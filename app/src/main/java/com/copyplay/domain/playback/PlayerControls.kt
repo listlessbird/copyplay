@@ -26,6 +26,11 @@ enum class SeekSide {
     Forward,
 }
 
+enum class VerticalGestureTarget {
+    Brightness,
+    Volume,
+}
+
 object PlayerGesturePolicy {
     private const val DoubleTapSeekMillis = 10_000L
     private const val HorizontalSeekStepMillis = 1_000L
@@ -56,6 +61,15 @@ object PlayerGesturePolicy {
         return clampSeek(startPositionMillis + seekChange, durationMillis)
     }
 
+    fun verticalTarget(
+        startX: Float,
+        viewWidth: Int,
+        borderPx: Float,
+    ): VerticalGestureTarget? {
+        if (viewWidth <= 0 || startX < borderPx || startX > viewWidth - borderPx) return null
+        return if (startX < viewWidth / 2f) VerticalGestureTarget.Brightness else VerticalGestureTarget.Volume
+    }
+
     private fun clampSeek(positionMillis: Long, durationMillis: Long?): Long {
         val lowerClamped = positionMillis.coerceAtLeast(0)
         return durationMillis?.takeIf { it > 0 }?.let { lowerClamped.coerceAtMost(it) } ?: lowerClamped
@@ -68,6 +82,10 @@ object PlayerPictureInPicturePolicy {
         isPlaying: Boolean,
         hasVideo: Boolean,
     ): Boolean = sdkInt >= 26 && isPlaying && hasVideo
+}
+
+object PlayerAudioFocusPolicy {
+    fun shouldHandleAudioRouteChanges(isTelevision: Boolean): Boolean = !isTelevision
 }
 
 private fun Int.floorMod(modulus: Int): Int =

@@ -68,4 +68,50 @@ class PlayerControlsTest {
         assertFalse(PlayerPictureInPicturePolicy.isEligible(sdkInt = 35, isPlaying = false, hasVideo = true))
         assertFalse(PlayerPictureInPicturePolicy.isEligible(sdkInt = 35, isPlaying = true, hasVideo = false))
     }
+
+    @Test
+    fun `vertical gestures target brightness on the left and volume on the right`() {
+        assertEquals(
+            VerticalGestureTarget.Brightness,
+            PlayerGesturePolicy.verticalTarget(
+                startX = 200f,
+                viewWidth = 1_000,
+                borderPx = 24f,
+            ),
+        )
+        assertEquals(
+            VerticalGestureTarget.Volume,
+            PlayerGesturePolicy.verticalTarget(
+                startX = 800f,
+                viewWidth = 1_000,
+                borderPx = 24f,
+            ),
+        )
+    }
+
+    @Test
+    fun `vertical gestures ignore system edge areas`() {
+        assertEquals(
+            null,
+            PlayerGesturePolicy.verticalTarget(
+                startX = 12f,
+                viewWidth = 1_000,
+                borderPx = 24f,
+            ),
+        )
+        assertEquals(
+            null,
+            PlayerGesturePolicy.verticalTarget(
+                startX = 990f,
+                viewWidth = 1_000,
+                borderPx = 24f,
+            ),
+        )
+    }
+
+    @Test
+    fun `phones handle noisy audio route changes but television playback does not`() {
+        assertTrue(PlayerAudioFocusPolicy.shouldHandleAudioRouteChanges(isTelevision = false))
+        assertFalse(PlayerAudioFocusPolicy.shouldHandleAudioRouteChanges(isTelevision = true))
+    }
 }
