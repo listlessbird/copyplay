@@ -4,6 +4,7 @@ sealed interface CopypartyListingResult {
     data class Success(
         val directories: List<CopypartyRemoteEntry>,
         val files: List<CopypartyRemoteEntry>,
+        val identity: CopypartyServerIdentity? = null,
     ) : CopypartyListingResult
 
     data class Failure(

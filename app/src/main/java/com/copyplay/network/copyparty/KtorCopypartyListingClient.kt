@@ -5,6 +5,7 @@ import com.copyplay.domain.server.CopypartyListingClient
 import com.copyplay.domain.server.CopypartyListingFailureReason
 import com.copyplay.domain.server.CopypartyListingResult
 import com.copyplay.domain.server.CopypartyRemoteEntry
+import com.copyplay.domain.server.CopypartyServerIdentity
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -37,6 +38,9 @@ class KtorCopypartyListingClient(
                 CopypartyListingResult.Success(
                     directories = listing.dirs.orEmpty().map { it.toDomainEntry() },
                     files = listing.files.orEmpty().map { it.toDomainEntry() },
+                    identity = CopypartyServerIdentity(
+                        displayName = listing.srvinf?.toCopypartyServerDisplayName(),
+                    ),
                 )
             }
         } catch (_: SerializationException) {
@@ -71,6 +75,7 @@ class KtorCopypartyListingClient(
 private data class CopypartyListingResponse(
     val dirs: List<CopypartyEntry>? = null,
     val files: List<CopypartyEntry>? = null,
+    val srvinf: String? = null,
 )
 
 @Serializable
@@ -90,3 +95,9 @@ private data class CopypartyEntry(
             modifiedEpochSeconds = modifiedEpochSeconds,
         )
 }
+
+internal fun String.toCopypartyServerDisplayName(): String? =
+    replace(Regex("<[^>]+>"), "")
+        .substringBefore("//")
+        .trim()
+        .takeIf { it.isNotBlank() }

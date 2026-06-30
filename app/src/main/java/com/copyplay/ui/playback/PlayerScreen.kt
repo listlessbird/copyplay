@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.Uri
@@ -19,10 +20,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -34,7 +38,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.AudioAttributes
@@ -62,6 +69,7 @@ import com.copyplay.domain.playback.PlaybackSpeedPreset
 import com.copyplay.domain.playback.PlaybackSubtitleTrack
 import com.copyplay.domain.playback.PlayerAudioFocusPolicy
 import com.copyplay.domain.playback.PlayerGesturePolicy
+import com.copyplay.domain.playback.PlayerOrientationMode
 import com.copyplay.domain.playback.PlayerPictureInPicturePolicy
 import com.copyplay.domain.playback.PlayerResizeMode
 import com.copyplay.domain.playback.SeekSide
@@ -90,7 +98,11 @@ fun PlayerScreen(
     var currentIndex by remember(session) { mutableStateOf(session.currentIndex) }
     var playbackSpeed by remember(session) { mutableStateOf(1.0f) }
     var playerResizeMode by remember(session) { mutableStateOf(PlayerResizeMode.Fit) }
+    var playerOrientationMode by remember(session) { mutableStateOf(PlayerOrientationMode.System) }
     var gestureMessage by remember(session) { mutableStateOf<String?>(null) }
+    val originalRequestedOrientation = remember(activity) {
+        activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
     val player = remember(session) {
         val compatibilitySettings = PlaybackCompatibilityPolicy.defaultSettings()
         val renderersFactory = DefaultRenderersFactory(context)
@@ -155,7 +167,8 @@ fun PlayerScreen(
             }
             player.removeListener(listener)
             player.release()
-            }
+            activity?.requestedOrientation = originalRequestedOrientation
+        }
     }
 
     LaunchedEffect(gestureMessage) {
@@ -209,105 +222,152 @@ fun PlayerScreen(
         FlowRow(
             modifier = Modifier
                 .align(Alignment.TopStart)
+                .statusBarsPadding()
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(onClick = onBack) {
-                Text("Back")
-            }
-            OutlinedButton(
-                enabled = currentIndex > 0,
-                onClick = { player.seekToPreviousMediaItem() },
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = Color.Black.copy(alpha = 0.62f),
+                contentColor = Color.White,
             ) {
-                Text("Previous")
-            }
-            OutlinedButton(
-                enabled = player.hasNextMediaItem(),
-                onClick = { player.seekToNextMediaItem() },
-            ) {
-                Text("Next")
-            }
-            OutlinedButton(
-                onClick = {
-                    player.seekTo(player.currentMediaItemIndex, 0)
-                    player.playWhenReady = true
-                },
-            ) {
-                Text("Start over")
-            }
-            OutlinedButton(
-                onClick = {
-                    val nextSpeed = PlaybackSpeedPreset.nextAfter(playbackSpeed)
-                    playbackSpeed = nextSpeed
-                    player.setPlaybackSpeed(nextSpeed)
-                    gestureMessage = "Speed ${nextSpeed.formatSpeed()}x"
-                },
-            ) {
-                Text("${playbackSpeed.formatSpeed()}x")
-            }
-            OutlinedButton(
-                onClick = {
-                    playerResizeMode = playerResizeMode.next()
-                    gestureMessage = playerResizeMode.label
-                },
-            ) {
-                Text(playerResizeMode.label)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                OutlinedButton(
-                    enabled = activity != null &&
-                        context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE),
-                    onClick = {
-                        val currentActivity = activity
-                        if (
-                            currentActivity != null &&
-                            PlayerPictureInPicturePolicy.isEligible(
-                                sdkInt = Build.VERSION.SDK_INT,
-                                isPlaying = player.isPlaying,
-                                hasVideo = true,
-                            )
-                        ) {
-                            currentActivity.enterCopyplayPictureInPicture(
-                                onFailure = { gestureMessage = it },
-                            )
-                        } else {
-                            gestureMessage = "Play video before PiP"
-                        }
-                    },
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("PiP")
+                    Text(
+                        text = session.playlist.getOrNull(currentIndex)?.title ?: session.currentItem.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(onClick = onBack) {
+                            Text("Back")
+                        }
+                        OutlinedButton(
+                            enabled = currentIndex > 0,
+                            onClick = { player.seekToPreviousMediaItem() },
+                        ) {
+                            Text("Previous")
+                        }
+                        OutlinedButton(
+                            enabled = player.hasNextMediaItem(),
+                            onClick = { player.seekToNextMediaItem() },
+                        ) {
+                            Text("Next")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                player.seekTo(player.currentMediaItemIndex, 0)
+                                player.playWhenReady = true
+                            },
+                        ) {
+                            Text("Start over")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val nextSpeed = PlaybackSpeedPreset.nextAfter(playbackSpeed)
+                                playbackSpeed = nextSpeed
+                                player.setPlaybackSpeed(nextSpeed)
+                                gestureMessage = "Speed ${nextSpeed.formatSpeed()}x"
+                            },
+                        ) {
+                            Text("${playbackSpeed.formatSpeed()}x")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                playerResizeMode = playerResizeMode.next()
+                                gestureMessage = playerResizeMode.label
+                            },
+                        ) {
+                            Text(playerResizeMode.label)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                playerOrientationMode = playerOrientationMode.next()
+                                activity?.applyPlayerOrientation(playerOrientationMode)
+                                gestureMessage = playerOrientationMode.label
+                            },
+                        ) {
+                            Text("Rotate")
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            OutlinedButton(
+                                enabled = activity != null &&
+                                    context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE),
+                                onClick = {
+                                    val currentActivity = activity
+                                    if (
+                                        currentActivity != null &&
+                                        PlayerPictureInPicturePolicy.isEligible(
+                                            sdkInt = Build.VERSION.SDK_INT,
+                                            isPlaying = player.isPlaying,
+                                            hasVideo = true,
+                                        )
+                                    ) {
+                                        currentActivity.enterCopyplayPictureInPicture(
+                                            onFailure = { gestureMessage = it },
+                                        )
+                                    } else {
+                                        gestureMessage = "Play video before PiP"
+                                    }
+                                },
+                            ) {
+                                Text("PiP")
+                            }
+                        }
+                    }
                 }
             }
         }
 
         gestureMessage?.let { message ->
-            Text(
+            Surface(
                 modifier = Modifier.align(Alignment.Center),
-                text = message,
-                color = MaterialTheme.colorScheme.onPrimary,
-                style = MaterialTheme.typography.headlineMedium,
-            )
+                shape = MaterialTheme.shapes.medium,
+                color = Color.Black.copy(alpha = 0.68f),
+                contentColor = Color.White,
+            ) {
+                Text(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                    text = message,
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+            }
         }
 
         failure?.let { message ->
-            Column(
+            Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .navigationBarsPadding()
                     .padding(16.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surface,
             ) {
-                Text(
-                    text = message.title,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                message.detail?.let { detail ->
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Text(
-                        text = detail,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = message.title,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
                     )
+                    message.detail?.let { detail ->
+                        Text(
+                            text = detail,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             }
         }
@@ -382,6 +442,21 @@ private val PlayerResizeMode.label: String
         PlayerResizeMode.Fit -> "Fit"
         PlayerResizeMode.Crop -> "Crop"
     }
+
+private val PlayerOrientationMode.label: String
+    get() = when (this) {
+        PlayerOrientationMode.System -> "Device orientation"
+        PlayerOrientationMode.Landscape -> "Landscape"
+        PlayerOrientationMode.Portrait -> "Portrait"
+    }
+
+private fun Activity.applyPlayerOrientation(mode: PlayerOrientationMode) {
+    requestedOrientation = when (mode) {
+        PlayerOrientationMode.System -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        PlayerOrientationMode.Landscape -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        PlayerOrientationMode.Portrait -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+    }
+}
 
 private fun PlayerResizeMode.toMedia3ResizeMode(): Int =
     when (this) {

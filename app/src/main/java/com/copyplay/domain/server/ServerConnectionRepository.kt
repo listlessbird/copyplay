@@ -14,8 +14,13 @@ class ServerConnectionRepository(
 
         return when (val listingResult = listingClient.listRoot(normalizedUrl)) {
             is CopypartyListingResult.Success -> {
-                serverConfigStore.save(ServerConfig(normalizedUrl))
-                ServerConnectionResult.Success(ServerConfig(normalizedUrl))
+                val serverConfig = ServerConfig(normalizedUrl)
+                serverConfigStore.save(serverConfig)
+                serverConfigStore.rememberSuccessfulConnection(
+                    serverConfig = serverConfig,
+                    identity = listingResult.identity,
+                )
+                ServerConnectionResult.Success(serverConfig)
             }
 
             is CopypartyListingResult.Failure -> {

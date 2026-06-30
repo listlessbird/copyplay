@@ -17,7 +17,10 @@ class CopyplayViewModelFactory(
                 CopyplayAppViewModel(container.serverConfigStore) as T
 
             modelClass.isAssignableFrom(SetupViewModel::class.java) ->
-                SetupViewModel(container.serverConnectionRepository) as T
+                SetupViewModel(
+                    serverConfigStore = container.serverConfigStore,
+                    serverConnectionRepository = container.serverConnectionRepository,
+                ) as T
 
             modelClass.isAssignableFrom(BrowserViewModel::class.java) ->
                 BrowserViewModel(container.copypartyFolderRepository) as T

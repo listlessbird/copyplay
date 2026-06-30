@@ -20,6 +20,13 @@ class PlayerControlsTest {
     }
 
     @Test
+    fun `orientation button cycles through landscape portrait and system`() {
+        assertEquals(PlayerOrientationMode.Landscape, PlayerOrientationMode.System.next())
+        assertEquals(PlayerOrientationMode.Portrait, PlayerOrientationMode.Landscape.next())
+        assertEquals(PlayerOrientationMode.System, PlayerOrientationMode.Portrait.next())
+    }
+
+    @Test
     fun `double tap seeks by ten seconds and clamps to duration`() {
         assertEquals(
             0L,

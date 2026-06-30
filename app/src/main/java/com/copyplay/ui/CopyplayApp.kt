@@ -41,7 +41,8 @@ fun CopyplayApp(
         return
     }
 
-    val configuredServer = (launchState.value as? AppLaunchState.Configured)?.serverConfig
+    val configuredState = launchState.value as? AppLaunchState.Configured
+    val configuredServer = configuredState?.serverConfig
     val progressEntries = playbackProgressStore.progressEntries.collectAsStateWithLifecycle(emptyList())
     val homeFeed = remember(progressEntries.value) {
         HomeFeedPolicy.fromProgress(progressEntries.value)
@@ -72,6 +73,7 @@ fun CopyplayApp(
         composable(CopyplayRoute.Home.name) {
             HomeScreen(
                 configuredServer = configuredServer,
+                savedServer = configuredState?.savedServer,
                 feed = homeFeed,
                 onBrowse = { navController.navigate(CopyplayRoute.Browser.name) },
                 onOpenVideo = { item ->

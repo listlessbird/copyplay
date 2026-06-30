@@ -21,6 +21,20 @@ enum class PlayerResizeMode {
         }
 }
 
+enum class PlayerOrientationMode {
+    System,
+    Landscape,
+    Portrait,
+    ;
+
+    fun next(): PlayerOrientationMode =
+        when (this) {
+            System -> Landscape
+            Landscape -> Portrait
+            Portrait -> System
+        }
+}
+
 enum class SeekSide {
     Backward,
     Forward,

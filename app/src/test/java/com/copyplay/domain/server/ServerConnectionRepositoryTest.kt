@@ -19,6 +19,7 @@ class ServerConnectionRepositoryTest {
             CopypartyListingResult.Success(
                 directories = listOf(remoteEntry("movies/")),
                 files = listOf(remoteEntry("movie.mp4"), remoteEntry("notes.txt")),
+                identity = CopypartyServerIdentity(displayName = "copybox"),
             ),
         )
         val repository = ServerConnectionRepository(client, store)
@@ -30,6 +31,16 @@ class ServerConnectionRepositoryTest {
             result,
         )
         assertEquals(ServerConfig("http://copybox.tailnet.local:3923/demo"), store.configuredServer.first())
+        assertEquals(
+            listOf(
+                SavedServerHost(
+                    baseUrl = "http://copybox.tailnet.local:3923/demo",
+                    displayName = "copybox",
+                    lastConnectedAtEpochMillis = 1_000,
+                ),
+            ),
+            store.savedServers.first(),
+        )
         assertEquals(listOf("http://copybox.tailnet.local:3923/demo"), client.requestedBaseUrls)
     }
 
@@ -74,11 +85,26 @@ class ServerConnectionRepositoryTest {
 
 private class InMemoryServerConfigStore : ServerConfigStore {
     private val mutableConfiguredServer = MutableStateFlow<ServerConfig?>(null)
+    private val mutableSavedServers = MutableStateFlow<List<SavedServerHost>>(emptyList())
 
     override val configuredServer: Flow<ServerConfig?> = mutableConfiguredServer
+    override val savedServers: Flow<List<SavedServerHost>> = mutableSavedServers
 
     override suspend fun save(serverConfig: ServerConfig) {
         mutableConfiguredServer.value = serverConfig
+    }
+
+    override suspend fun rememberSuccessfulConnection(
+        serverConfig: ServerConfig,
+        identity: CopypartyServerIdentity?,
+    ) {
+        mutableSavedServers.value = listOf(
+            SavedServerHost(
+                baseUrl = serverConfig.baseUrl,
+                displayName = identity?.displayName,
+                lastConnectedAtEpochMillis = 1_000,
+            ),
+        )
     }
 
     override suspend fun clear() {
