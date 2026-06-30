@@ -12,20 +12,22 @@ import android.os.Build
 import android.util.Rational
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.View
 import android.view.Window
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.AudioAttributes
@@ -56,6 +57,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.lifecycle.lifecycleScope
 import com.copyplay.domain.playback.DecoderExtensionMode
 import com.copyplay.domain.playback.PlaybackCompatibilityPolicy
 import com.copyplay.domain.playback.PlaybackErrorClassifier
@@ -79,6 +81,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
+private const val PlayerControllerTimeoutMs = 3_500
+
 @OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
@@ -94,14 +98,20 @@ fun PlayerScreen(
     val context = LocalContext.current
     val activity = context.findActivity()
     val scope = rememberCoroutineScope()
+    val progressScope = (activity as? ComponentActivity)?.lifecycleScope ?: scope
     var failure by remember(session) { mutableStateOf<PlaybackFailureMessage?>(null) }
     var currentIndex by remember(session) { mutableStateOf(session.currentIndex) }
+    var isPlaying by remember(session) { mutableStateOf(false) }
+    var hudVisible by remember(session) { mutableStateOf(true) }
     var playbackSpeed by remember(session) { mutableStateOf(1.0f) }
     var playerResizeMode by remember(session) { mutableStateOf(PlayerResizeMode.Fit) }
     var playerOrientationMode by remember(session) { mutableStateOf(PlayerOrientationMode.System) }
     var gestureMessage by remember(session) { mutableStateOf<String?>(null) }
     val originalRequestedOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+    val originalScreenBrightness = remember(activity) {
+        activity?.window?.attributes?.screenBrightness ?: -1f
     }
     val player = remember(session) {
         val compatibilitySettings = PlaybackCompatibilityPolicy.defaultSettings()
@@ -131,6 +141,25 @@ fun PlayerScreen(
                 prepare()
             }
     }
+    fun saveProgressSnapshot() {
+        player.progressSnapshot(session)?.let { progress ->
+            progressScope.launch {
+                progressStore.save(progress)
+            }
+        }
+    }
+
+    fun exitPlayer() {
+        saveProgressSnapshot()
+        player.pause()
+        player.clearVideoSurface()
+        activity?.setPlayerSystemBarsVisible(true)
+        onBack()
+    }
+
+    BackHandler {
+        exitPlayer()
+    }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -149,8 +178,13 @@ fun PlayerScreen(
                 currentIndex = player.currentMediaItemIndex
             }
 
+            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                isPlaying = isPlayingNow
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
+                    hudVisible = true
                     scope.launch {
                         player.progressSnapshot(session)?.let { progressStore.save(it) }
                     }
@@ -159,15 +193,15 @@ fun PlayerScreen(
         }
         player.addListener(listener)
         onDispose {
-            val finalProgress = player.progressSnapshot(session)
-            if (finalProgress != null) {
-                scope.launch {
-                    progressStore.save(finalProgress)
-                }
-            }
+            saveProgressSnapshot()
             player.removeListener(listener)
+            player.pause()
+            player.clearVideoSurface()
+            player.clearMediaItems()
             player.release()
             activity?.requestedOrientation = originalRequestedOrientation
+            activity?.restorePlayerScreenBrightness(originalScreenBrightness)
+            activity?.setPlayerSystemBarsVisible(true)
         }
     }
 
@@ -192,11 +226,24 @@ fun PlayerScreen(
                 PlayerView(viewContext).apply {
                     this.player = player
                     useController = true
-                    controllerShowTimeoutMs = 3_000
+                    controllerShowTimeoutMs = PlayerControllerTimeoutMs
                     resizeMode = playerResizeMode.toMedia3ResizeMode()
+                    setShowPreviousButton(false)
+                    setShowNextButton(false)
+                    setShowFastForwardButton(false)
+                    setShowRewindButton(false)
+                    setControllerHideOnTouch(false)
+                    setControllerAutoShow(true)
                     setShowSubtitleButton(true)
                     subtitleView?.setUserDefaultStyle()
                     subtitleView?.setUserDefaultTextSize()
+                    setControllerVisibilityListener(
+                        PlayerView.ControllerVisibilityListener { visibility ->
+                            val visible = visibility == View.VISIBLE
+                            hudVisible = visible
+                            activity?.setPlayerSystemBarsVisible(visible)
+                        },
+                    )
                     val audioManager = viewContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                     val detector = GestureDetector(
                         viewContext,
@@ -205,6 +252,7 @@ fun PlayerScreen(
                             player = player,
                             window = activity?.window,
                             audioManager = audioManager,
+                            isControllerVisible = { hudVisible },
                             onFeedback = { gestureMessage = it },
                         ),
                     )
@@ -219,112 +267,68 @@ fun PlayerScreen(
             },
         )
 
-        FlowRow(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(16.dp),
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                color = Color.Black.copy(alpha = 0.62f),
-                contentColor = Color.White,
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        text = session.playlist.getOrNull(currentIndex)?.title ?: session.currentItem.title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+        val pictureInPictureSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            activity != null &&
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        PlayerChrome(
+            state = PlayerChromeState(
+                visible = hudVisible || failure != null,
+                title = session.playlist.getOrNull(currentIndex)?.title ?: session.currentItem.title,
+                hasPrevious = currentIndex > 0,
+                hasNext = player.hasNextMediaItem(),
+                speedLabel = "${playbackSpeed.formatSpeed()}x",
+                resizeLabel = playerResizeMode.label,
+                orientationLabel = playerOrientationMode.label,
+                showPictureInPicture = pictureInPictureSupported,
+                canEnterPictureInPicture = pictureInPictureSupported &&
+                    PlayerPictureInPicturePolicy.isEligible(
+                        sdkInt = Build.VERSION.SDK_INT,
+                        isPlaying = isPlaying,
+                        hasVideo = true,
+                    ),
+            ),
+            actions = PlayerChromeActions(
+                onBack = { exitPlayer() },
+                onPrevious = { player.seekToPreviousMediaItem() },
+                onNext = { player.seekToNextMediaItem() },
+                onStartOver = {
+                    player.seekTo(player.currentMediaItemIndex, 0)
+                    player.playWhenReady = true
+                },
+                onChangeSpeed = {
+                    val nextSpeed = PlaybackSpeedPreset.nextAfter(playbackSpeed)
+                    playbackSpeed = nextSpeed
+                    player.setPlaybackSpeed(nextSpeed)
+                    gestureMessage = "Speed ${nextSpeed.formatSpeed()}x"
+                },
+                onToggleResize = {
+                    playerResizeMode = playerResizeMode.next()
+                    gestureMessage = playerResizeMode.label
+                },
+                onRotate = {
+                    playerOrientationMode = playerOrientationMode.next()
+                    activity?.applyPlayerOrientation(playerOrientationMode)
+                    gestureMessage = playerOrientationMode.label
+                },
+                onPictureInPicture = {
+                    val currentActivity = activity
+                    if (
+                        currentActivity != null &&
+                        PlayerPictureInPicturePolicy.isEligible(
+                            sdkInt = Build.VERSION.SDK_INT,
+                            isPlaying = player.isPlaying,
+                            hasVideo = true,
+                        )
                     ) {
-                        Button(onClick = onBack) {
-                            Text("Back")
-                        }
-                        OutlinedButton(
-                            enabled = currentIndex > 0,
-                            onClick = { player.seekToPreviousMediaItem() },
-                        ) {
-                            Text("Previous")
-                        }
-                        OutlinedButton(
-                            enabled = player.hasNextMediaItem(),
-                            onClick = { player.seekToNextMediaItem() },
-                        ) {
-                            Text("Next")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                player.seekTo(player.currentMediaItemIndex, 0)
-                                player.playWhenReady = true
-                            },
-                        ) {
-                            Text("Start over")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                val nextSpeed = PlaybackSpeedPreset.nextAfter(playbackSpeed)
-                                playbackSpeed = nextSpeed
-                                player.setPlaybackSpeed(nextSpeed)
-                                gestureMessage = "Speed ${nextSpeed.formatSpeed()}x"
-                            },
-                        ) {
-                            Text("${playbackSpeed.formatSpeed()}x")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                playerResizeMode = playerResizeMode.next()
-                                gestureMessage = playerResizeMode.label
-                            },
-                        ) {
-                            Text(playerResizeMode.label)
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                playerOrientationMode = playerOrientationMode.next()
-                                activity?.applyPlayerOrientation(playerOrientationMode)
-                                gestureMessage = playerOrientationMode.label
-                            },
-                        ) {
-                            Text("Rotate")
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            OutlinedButton(
-                                enabled = activity != null &&
-                                    context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE),
-                                onClick = {
-                                    val currentActivity = activity
-                                    if (
-                                        currentActivity != null &&
-                                        PlayerPictureInPicturePolicy.isEligible(
-                                            sdkInt = Build.VERSION.SDK_INT,
-                                            isPlaying = player.isPlaying,
-                                            hasVideo = true,
-                                        )
-                                    ) {
-                                        currentActivity.enterCopyplayPictureInPicture(
-                                            onFailure = { gestureMessage = it },
-                                        )
-                                    } else {
-                                        gestureMessage = "Play video before PiP"
-                                    }
-                                },
-                            ) {
-                                Text("PiP")
-                            }
-                        }
+                        currentActivity.enterCopyplayPictureInPicture(
+                            onFailure = { gestureMessage = it },
+                        )
+                    } else {
+                        gestureMessage = "Play video before PiP"
                     }
-                }
-            }
-        }
+                },
+            ),
+        )
 
         gestureMessage?.let { message ->
             Surface(
@@ -494,11 +498,45 @@ private fun Activity.enterCopyplayPictureInPicture(onFailure: (String) -> Unit) 
     }
 }
 
+private fun Activity.restorePlayerScreenBrightness(originalScreenBrightness: Float) {
+    val attributes = window.attributes
+    attributes.screenBrightness = originalScreenBrightness
+    window.attributes = attributes
+}
+
+private fun Activity.setPlayerSystemBarsVisible(visible: Boolean) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        window.insetsController?.let { controller ->
+            if (visible) {
+                controller.show(WindowInsets.Type.systemBars())
+            } else {
+                controller.hide(WindowInsets.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+        return
+    }
+
+    @Suppress("DEPRECATION")
+    window.decorView.systemUiVisibility = if (visible) {
+        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+    } else {
+        View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+    }
+}
+
 private class PlayerGestureTouchListener(
     private val playerView: PlayerView,
     private val player: Player,
     private val window: Window?,
     private val audioManager: AudioManager,
+    private val isControllerVisible: () -> Boolean,
     private val onFeedback: (String) -> Unit,
 ) : GestureDetector.SimpleOnGestureListener() {
     private val gestureBorderPx = 24f
@@ -517,7 +555,11 @@ private class PlayerGestureTouchListener(
     }
 
     override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
-        playerView.showController()
+        if (isControllerVisible() && player.isPlaying) {
+            playerView.hideController()
+        } else {
+            playerView.showController()
+        }
         return true
     }
 
