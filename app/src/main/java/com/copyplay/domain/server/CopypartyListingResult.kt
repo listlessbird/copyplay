@@ -2,8 +2,8 @@ package com.copyplay.domain.server
 
 sealed interface CopypartyListingResult {
     data class Success(
-        val directories: Int,
-        val files: Int,
+        val directories: List<CopypartyRemoteEntry>,
+        val files: List<CopypartyRemoteEntry>,
     ) : CopypartyListingResult
 
     data class Failure(
@@ -11,6 +11,13 @@ sealed interface CopypartyListingResult {
         val message: String,
     ) : CopypartyListingResult
 }
+
+data class CopypartyRemoteEntry(
+    val href: String,
+    val sizeBytes: Long?,
+    val ext: String?,
+    val modifiedEpochSeconds: Long?,
+)
 
 enum class CopypartyListingFailureReason {
     Network,

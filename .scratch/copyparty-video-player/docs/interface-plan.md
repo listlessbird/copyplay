@@ -71,15 +71,26 @@ The module hides DataStore key names and Android persistence details. It is deli
 
 ### Browser module
 
-Expected seam for issue 02:
+Seam for issue 02:
 
 ```kotlin
 interface CopypartyFolderRepository {
-    suspend fun loadFolder(server: ServerConfig, path: CopypartyPath, refresh: RefreshMode): FolderListing
+    suspend fun loadFolder(server: ServerConfig, path: CopypartyPath): FolderLoadResult
 }
 ```
 
-The interface should return a domain `FolderListing` with visible folders/videos and hidden subtitle candidates. The caller should not know about copyparty JSON fields, extension filtering, natural sorting, or subtitle retention rules.
+Interface facts:
+
+- `CopypartyPath` is a value object for root and nested folder paths.
+- `FolderListing.visibleEntries` contains folders and recognized videos only.
+- `FolderListing.hiddenSubtitles` retains subtitle files from the current folder for playback use.
+- Folders sort before videos; each group uses natural ordering.
+- Non-video files are intentionally absent from the listing model.
+- Ktor response shape, URL encoding, copyparty `href` values, extension filtering, and natural sorting stay behind the module interface.
+
+Depth:
+
+The browser UI learns one method and one domain model. If the repository were deleted, every browser caller would need to relearn copyparty JSON, video/subtitle extension rules, and sorting. Keeping those facts local makes issue 03 cache replacement straightforward: the cache can become another adapter behind the same folder seam.
 
 ### Playback module
 

@@ -2,6 +2,7 @@ package com.copyplay
 
 import android.app.Application
 import com.copyplay.data.server.DataStoreServerConfigStore
+import com.copyplay.domain.browser.CopypartyFolderRepository
 import com.copyplay.domain.server.ServerConnectionRepository
 import com.copyplay.network.copyparty.CopypartyHttpClientFactory
 import com.copyplay.network.copyparty.KtorCopypartyListingClient
@@ -16,6 +17,7 @@ class CopyplayApplication : Application() {
         val listingClient = KtorCopypartyListingClient(CopypartyHttpClientFactory.create())
         container = CopyplayContainer(
             serverConfigStore = store,
+            copypartyFolderRepository = CopypartyFolderRepository(listingClient),
             serverConnectionRepository = ServerConnectionRepository(
                 listingClient = listingClient,
                 serverConfigStore = store,

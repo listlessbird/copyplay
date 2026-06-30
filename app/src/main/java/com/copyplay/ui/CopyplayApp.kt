@@ -6,7 +6,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.copyplay.ui.browser.BrowserPlaceholderScreen
+import com.copyplay.ui.browser.BrowserScreen
+import com.copyplay.ui.browser.BrowserViewModel
 import com.copyplay.ui.home.HomeScreen
 import com.copyplay.ui.settings.SettingsScreen
 import com.copyplay.ui.settings.SettingsViewModel
@@ -57,7 +58,9 @@ fun CopyplayApp(
         }
 
         composable(CopyplayRoute.Browser.name) {
-            BrowserPlaceholderScreen(
+            val browserViewModel: BrowserViewModel = viewModel(factory = viewModelFactory)
+            BrowserScreen(
+                viewModel = browserViewModel,
                 configuredServer = configuredServer,
                 onBack = { navController.popBackStack() },
             )

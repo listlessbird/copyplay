@@ -1,6 +1,7 @@
 package com.copyplay.domain.server
 
 import com.copyplay.data.server.ServerConfigStore
+import com.copyplay.domain.browser.CopypartyPath
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -14,7 +15,12 @@ class ServerConnectionRepositoryTest {
     @Test
     fun `successful validation saves normalized server config`() = runTest {
         val store = InMemoryServerConfigStore()
-        val client = FakeCopypartyListingClient(CopypartyListingResult.Success(directories = 1, files = 2))
+        val client = FakeCopypartyListingClient(
+            CopypartyListingResult.Success(
+                directories = listOf(remoteEntry("movies/")),
+                files = listOf(remoteEntry("movie.mp4"), remoteEntry("notes.txt")),
+            ),
+        )
         val repository = ServerConnectionRepository(client, store)
 
         val result = repository.validateAndSave("  http://copybox.tailnet.local:3923/demo/  ")
@@ -47,7 +53,7 @@ class ServerConnectionRepositoryTest {
     @Test
     fun `non http url is rejected before calling copyparty`() = runTest {
         val store = InMemoryServerConfigStore()
-        val client = FakeCopypartyListingClient(CopypartyListingResult.Success(directories = 0, files = 0))
+        val client = FakeCopypartyListingClient(CopypartyListingResult.Success(directories = emptyList(), files = emptyList()))
         val repository = ServerConnectionRepository(client, store)
 
         val result = repository.validateAndSave("ftp://copybox.local/media")
@@ -83,8 +89,19 @@ private class FakeCopypartyListingClient(
 ) : CopypartyListingClient {
     val requestedBaseUrls = mutableListOf<String>()
 
-    override suspend fun listRoot(baseUrl: String): CopypartyListingResult {
+    override suspend fun listFolder(baseUrl: String, path: CopypartyPath): CopypartyListingResult {
         requestedBaseUrls += baseUrl
         return result
     }
 }
+
+private fun remoteEntry(
+    href: String,
+    ext: String? = href.substringAfterLast('.', missingDelimiterValue = ""),
+): CopypartyRemoteEntry =
+    CopypartyRemoteEntry(
+        href = href,
+        sizeBytes = 100,
+        ext = ext,
+        modifiedEpochSeconds = 123,
+    )
