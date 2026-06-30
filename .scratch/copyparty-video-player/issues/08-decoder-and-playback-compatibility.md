@@ -25,9 +25,8 @@ Harden playback compatibility using the Just Video Player reference as the guide
 
 ## Notes
 
-- Copyplay now enables Media3 extension renderer mode after platform decoders and enables decoder fallback.
-- Native FFmpeg is intentionally not bundled in this slice. Media3's FFmpeg module requires local module wiring, NDK/CMake/Ninja, FFmpeg source builds, ABI packaging, licensing review, and APK-size decisions.
-- The build/distribution tradeoff is documented in `.scratch/copyparty-video-player/docs/playback-compatibility.md`.
+- Copyplay now packages reference-style native decoder extension AARs, enables Media3 extension renderer mode after platform decoders, and enables decoder fallback.
+- The FFmpeg build/distribution tradeoff is documented in `.scratch/copyparty-video-player/docs/playback-compatibility.md`.
 - Manual verification remains open for real files and device codec behavior.
 
 ## Blocked by

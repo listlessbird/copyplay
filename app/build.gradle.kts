@@ -55,6 +55,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.media3:media3-common:$media3Version")
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("lib-*.aar"))))
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
     implementation("androidx.navigation:navigation-compose:2.9.8")

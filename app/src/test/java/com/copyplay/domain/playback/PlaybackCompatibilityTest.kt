@@ -16,10 +16,10 @@ class PlaybackCompatibilityTest {
     }
 
     @Test
-    fun `default renderer policy documents that native ffmpeg is not bundled`() {
+    fun `default renderer policy documents that native ffmpeg is bundled`() {
         val settings = PlaybackCompatibilityPolicy.defaultSettings()
 
-        assertFalse(settings.includesNativeFfmpegExtension)
+        assertTrue(settings.includesNativeFfmpegExtension)
     }
 
     @Test

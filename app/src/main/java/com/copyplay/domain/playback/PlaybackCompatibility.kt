@@ -19,7 +19,7 @@ object PlaybackCompatibilityPolicy {
             decoderExtensionMode = DecoderExtensionMode.UseAfterPlatform,
             enableDecoderFallback = true,
             mapDolbyVisionProfile7ToHevc = false,
-            includesNativeFfmpegExtension = false,
+            includesNativeFfmpegExtension = true,
         )
 }
 
