@@ -44,6 +44,36 @@ class PlaybackSessionFactory(
     private val progressStore: PlaybackProgressStore,
     private val preferencesStore: PlaybackPreferencesStore,
 ) {
+    fun fromProgressEntry(
+        progress: PlaybackProgress,
+        startMode: PlaybackStartMode,
+    ): PlaybackSession {
+        val server = com.copyplay.domain.server.ServerConfig(progress.identity.serverBaseUrl)
+        val request = PlaybackRequest(
+            server = server,
+            pathSegments = progress.identity.pathSegments,
+            title = progress.title,
+            url = directFileUrl(server, progress.identity.pathSegments),
+        )
+        val item = PlaybackItem(
+            identity = progress.identity,
+            request = request,
+        )
+        val startPosition = when (startMode) {
+            PlaybackStartMode.Resume -> progress
+                .takeIf { it.watchStatus == PlaybackWatchStatus.ContinueWatching }
+                ?.positionMillis
+                ?: 0L
+            PlaybackStartMode.StartOver -> 0L
+        }
+        return PlaybackSession(
+            playlist = listOf(item),
+            currentIndex = 0,
+            startPositionMillis = startPosition,
+            autoplayNext = false,
+        )
+    }
+
     suspend fun fromFolderSelection(
         listing: FolderListing,
         selectedVideo: FolderEntry.Video,

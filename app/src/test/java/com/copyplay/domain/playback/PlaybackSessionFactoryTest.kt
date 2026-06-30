@@ -123,6 +123,56 @@ class PlaybackSessionFactoryTest {
 
         assertEquals(emptyList<PlaybackSubtitleTrack>(), session.currentItem.request.subtitleTracks)
     }
+
+    @Test
+    fun `home progress entry builds a single item resume session`() {
+        val progress = PlaybackProgress(
+            identity = PlaybackIdentity(
+                serverBaseUrl = "http://copybox.local",
+                pathSegments = listOf("Movies", "Movie Night.mkv"),
+                sizeBytes = 1_000,
+                modifiedEpochSeconds = 555,
+            ),
+            title = "Movie Night.mkv",
+            positionMillis = 12 * 60 * 1000,
+            durationMillis = 60 * 60 * 1000,
+            updatedAtEpochMillis = 1_000,
+        )
+
+        val session = PlaybackSessionFactory(
+            progressStore = InMemoryPlaybackProgressStore(),
+            preferencesStore = StaticPlaybackPreferencesStore(PlaybackPreferences()),
+        ).fromProgressEntry(progress, PlaybackStartMode.Resume)
+
+        assertEquals(listOf("Movie Night.mkv"), session.playlist.map { it.title })
+        assertEquals(0, session.currentIndex)
+        assertEquals(12 * 60 * 1000L, session.startPositionMillis)
+        assertEquals(false, session.autoplayNext)
+        assertEquals("http://copybox.local/Movies/Movie%20Night.mkv", session.currentItem.request.url)
+    }
+
+    @Test
+    fun `completed home progress entry starts over`() {
+        val progress = PlaybackProgress(
+            identity = PlaybackIdentity(
+                serverBaseUrl = "http://copybox.local",
+                pathSegments = listOf("Done.mkv"),
+                sizeBytes = 1_000,
+                modifiedEpochSeconds = 555,
+            ),
+            title = "Done.mkv",
+            positionMillis = 54 * 60 * 1000,
+            durationMillis = 60 * 60 * 1000,
+            updatedAtEpochMillis = 1_000,
+        )
+
+        val session = PlaybackSessionFactory(
+            progressStore = InMemoryPlaybackProgressStore(),
+            preferencesStore = StaticPlaybackPreferencesStore(PlaybackPreferences()),
+        ).fromProgressEntry(progress, PlaybackStartMode.Resume)
+
+        assertEquals(0L, session.startPositionMillis)
+    }
 }
 
 private fun remoteEntry(
