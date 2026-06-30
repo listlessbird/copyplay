@@ -210,6 +210,49 @@ Depth:
 
 This keeps preference persistence and Media3 playback behavior separate. The preference module is small but real because it has two callers: settings and playback session creation.
 
+### Sidecar subtitle module
+
+Seam for issue 06:
+
+```kotlin
+object SidecarSubtitleMatcher {
+    fun match(
+        server: ServerConfig,
+        video: FolderEntry.Video,
+        hiddenSubtitles: List<SubtitleCandidate>,
+    ): List<PlaybackSubtitleTrack>
+}
+```
+
+Interface facts:
+
+- Matching sidecars are attached to `PlaybackRequest.subtitleTracks`.
+- The matcher accepts same-basename subtitles and language or forced suffixes such as `.en.srt`, `.en.forced.ass`, and `.forced.srt`.
+- Supported sidecar MIME mappings are SubRip, WebVTT, and SSA/ASS.
+- Non-matching hidden subtitle files stay hidden and are not attached to unrelated videos.
+- The player translates `PlaybackSubtitleTrack` into Media3 `SubtitleConfiguration` values with label, MIME type, language, subtitle role flags, and default or forced selection flags.
+
+Depth:
+
+The module hides suffix parsing, subtitle MIME mapping, URL construction, and default/forced flag policy. If this module were deleted, the player would need to learn browser hidden-file details and filename conventions, reducing locality.
+
+### Track selection module
+
+Seam for issue 06:
+
+The first issue-06 implementation uses Media3's `PlayerView` and `PlayerControlView` track-selection controls as the module interface for embedded audio/subtitle tracks. Copyplay enables the subtitle button and uses Media3's built-in settings/audio menus instead of duplicating track-selection override code in app state.
+
+Interface facts:
+
+- Sidecar subtitles are exposed as Media3 text tracks through `SubtitleConfiguration`.
+- Embedded audio and subtitle tracks are exposed by Media3 from the loaded media item.
+- The player applies Android user caption style and text size defaults through `SubtitleView`.
+- Track persistence by ID is deferred until Copyplay has a custom track-selection module; relying on Media3 keeps the current interface small.
+
+Depth:
+
+This keeps track enumeration, override application, and embedded track parsing behind Media3's tested player UI module. A custom module would become worth adding when Copyplay needs persisted per-file track IDs or app-specific track labels.
+
 ## Checkpoint Scope
 
-This document covers issues 01 through 05. It intentionally does not design subtitle, decoder, gesture, PiP, or home interfaces yet; those should be planned when their prerequisite modules exist.
+This document covers issues 01 through 06. It intentionally does not design decoder, gesture, PiP, or home interfaces yet; those should be planned when their prerequisite modules exist.

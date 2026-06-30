@@ -64,6 +64,29 @@ class SidecarSubtitleMatcherTest {
         assertEquals(emptyList<PlaybackSubtitleTrack>(), matched)
     }
 
+    @Test
+    fun `forced-only sidecar is marked forced without a language`() {
+        val matched = SidecarSubtitleMatcher.match(
+            server = ServerConfig("http://copybox.local"),
+            video = video("Movie.mkv"),
+            hiddenSubtitles = listOf(subtitle("Movie.forced.srt")),
+        )
+
+        assertEquals(
+            listOf(
+                PlaybackSubtitleTrack(
+                    url = "http://copybox.local/Movie.forced.srt",
+                    label = "Movie.forced.srt",
+                    mimeType = SubtitleMimeTypes.SubRip,
+                    language = null,
+                    isForced = true,
+                    isDefault = false,
+                ),
+            ),
+            matched,
+        )
+    }
+
     private fun video(path: String): FolderEntry.Video =
         FolderEntry.Video(
             name = path.substringAfterLast('/'),

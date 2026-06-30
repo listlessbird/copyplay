@@ -104,6 +104,25 @@ class PlaybackSessionFactoryTest {
 
         assertEquals(false, session.autoplayNext)
     }
+
+    @Test
+    fun `videos without matching sidecars keep an empty subtitle track list`() = runTest {
+        val server = ServerConfig("http://copybox.local")
+        val listing = buildFolderListing(
+            server = server,
+            path = CopypartyPath.Root,
+            directories = emptyList(),
+            files = listOf(remoteEntry("Movie.mkv"), remoteEntry("Other.en.srt")),
+        )
+        val selected = listing.visibleEntries.filterIsInstance<FolderEntry.Video>().single()
+
+        val session = PlaybackSessionFactory(
+            progressStore = InMemoryPlaybackProgressStore(),
+            preferencesStore = StaticPlaybackPreferencesStore(PlaybackPreferences()),
+        ).fromFolderSelection(listing, selected, PlaybackStartMode.Resume)
+
+        assertEquals(emptyList<PlaybackSubtitleTrack>(), session.currentItem.request.subtitleTracks)
+    }
 }
 
 private fun remoteEntry(
