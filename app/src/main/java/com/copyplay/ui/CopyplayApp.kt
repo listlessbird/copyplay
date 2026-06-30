@@ -11,10 +11,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.copyplay.domain.home.HomeFeedPolicy
 import com.copyplay.domain.playback.PlaybackSession
-import com.copyplay.domain.playback.PlaybackStartMode
 import com.copyplay.domain.playback.PlaybackSessionFactory
 import com.copyplay.domain.playback.PlaybackProgressStore
+import com.copyplay.domain.playback.PlaybackStartMode
 import com.copyplay.ui.browser.BrowserScreen
 import com.copyplay.ui.browser.BrowserViewModel
 import com.copyplay.ui.home.HomeScreen
@@ -41,6 +42,10 @@ fun CopyplayApp(
     }
 
     val configuredServer = (launchState.value as? AppLaunchState.Configured)?.serverConfig
+    val progressEntries = playbackProgressStore.progressEntries.collectAsStateWithLifecycle(emptyList())
+    val homeFeed = remember(progressEntries.value) {
+        HomeFeedPolicy.fromProgress(progressEntries.value)
+    }
     var playbackSession by remember { mutableStateOf<PlaybackSession?>(null) }
     val startDestination = when (launchState.value) {
         AppLaunchState.FirstRun -> CopyplayRoute.Setup.name
@@ -67,7 +72,15 @@ fun CopyplayApp(
         composable(CopyplayRoute.Home.name) {
             HomeScreen(
                 configuredServer = configuredServer,
+                feed = homeFeed,
                 onBrowse = { navController.navigate(CopyplayRoute.Browser.name) },
+                onOpenVideo = { item ->
+                    playbackSession = playbackSessionFactory.fromProgressEntry(
+                        progress = item.progress,
+                        startMode = HomeFeedPolicy.startModeFor(item),
+                    )
+                    navController.navigate(CopyplayRoute.Player.name)
+                },
                 onSettings = { navController.navigate(CopyplayRoute.Settings.name) },
             )
         }
