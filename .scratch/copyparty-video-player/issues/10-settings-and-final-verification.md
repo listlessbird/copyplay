@@ -1,4 +1,6 @@
-Status: ready-for-agent
+Status: ready-for-human
+
+Implementation status: settings implemented - manual end-to-end verification pending
 
 ## Parent
 
@@ -12,15 +14,21 @@ This slice should leave v1 coherent rather than a set of disconnected features.
 
 ## Acceptance criteria
 
-- [ ] Settings can view and change the configured copyparty base URL.
-- [ ] Changing the base URL revalidates the server before replacing the active configuration.
-- [ ] Settings expose autoplay-next behavior.
-- [ ] Settings expose playback preferences implemented from the reference player, such as track language, decoder priority, subtitle style, or PiP options where included by earlier slices.
-- [ ] Settings avoid unsupported or unimplemented options.
-- [ ] The app does not request unnecessary permissions for the v1 scope.
+- [x] Settings can view and change the configured copyparty base URL.
+- [x] Changing the base URL revalidates the server before replacing the active configuration.
+- [x] Settings expose autoplay-next behavior.
+- [x] Settings expose playback preferences implemented from the reference player, such as track language, decoder priority, subtitle style, or PiP options where included by earlier slices.
+- [x] Settings avoid unsupported or unimplemented options.
+- [x] The app does not request unnecessary permissions for the v1 scope.
 - [ ] End-to-end manual verification covers setup, root browsing, nested browsing, hidden non-video files, hidden subtitle files, direct playback, seeking, sidecar subtitles, embedded tracks, audio tracks, gestures, PiP, autoplay next, progress resume, and home continue-watching.
-- [ ] Known limitations are documented locally, especially any playback formats unsupported by the device or Media3 configuration.
-- [ ] The local issue/PRD status reflects remaining work accurately after verification.
+- [x] Known limitations are documented locally, especially any playback formats unsupported by the device or Media3 configuration.
+- [x] The local issue/PRD status reflects remaining work accurately after verification.
+
+## Notes
+
+- Final manual checklist and known limitations are in `.scratch/copyparty-video-player/docs/final-verification.md`.
+- The Android manifest currently requests only `INTERNET`.
+- Manual verification remains open because it requires the user's Android 16 phone, Tailscale, and representative media on a copyparty server.
 
 ## Blocked by
 

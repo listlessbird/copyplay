@@ -1,6 +1,8 @@
 # Copyplay Copyparty Video Player PRD
 
-Status: ready-for-agent
+Status: ready-for-human
+
+Implementation status: v1 implemented - manual Android phone verification pending
 
 ## Problem Statement
 

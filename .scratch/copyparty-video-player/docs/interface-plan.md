@@ -329,6 +329,19 @@ Depth:
 
 The module keeps progress filtering, ordering, and start-mode policy out of Compose. The UI renders a feed and dispatches item clicks; it does not know progress thresholds or identity-to-URL construction.
 
+### Settings and verification module
+
+Seam for issue 10:
+
+- Settings uses `ServerConnectionRepository.validateAndSave` for URL changes, preserving the same validation-before-persistence rule as setup.
+- Settings uses `PlaybackPreferencesStore` for autoplay-next and read-only policy summaries for compatibility and caption behavior.
+- Unsupported native FFmpeg packaging is documented instead of exposed as a toggle.
+- Final manual checks and known limitations live in `.scratch/copyparty-video-player/docs/final-verification.md`.
+
+Depth:
+
+The settings UI remains an adapter over existing deep modules. It does not learn copyparty validation details, Media3 renderer constants, or progress rules.
+
 ## Checkpoint Scope
 
-This document covers issues 01 through 09. Final settings and verification remain for issue 10.
+This document covers issues 01 through 10. Manual Android phone verification remains open.
