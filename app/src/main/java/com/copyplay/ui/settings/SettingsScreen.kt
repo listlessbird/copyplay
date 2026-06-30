@@ -23,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.copyplay.domain.playback.DecoderExtensionMode
+import com.copyplay.domain.playback.PlaybackCompatibilityPolicy
 
 @Composable
 fun SettingsScreen(
@@ -32,6 +34,7 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val errorMessage = state.errorMessage
     val savedMessage = state.savedMessage
+    val compatibilitySettings = PlaybackCompatibilityPolicy.defaultSettings()
 
     Column(
         modifier = Modifier
@@ -91,6 +94,31 @@ fun SettingsScreen(
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Playback compatibility",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            SettingsFact(
+                label = "Decoder priority",
+                value = compatibilitySettings.decoderExtensionMode.label,
+            )
+            SettingsFact(
+                label = "Decoder fallback",
+                value = if (compatibilitySettings.enableDecoderFallback) "On" else "Off",
+            )
+            SettingsFact(
+                label = "Native FFmpeg",
+                value = if (compatibilitySettings.includesNativeFfmpegExtension) "Bundled" else "Not bundled",
+            )
+            SettingsFact(
+                label = "Subtitle style",
+                value = "Android caption settings",
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -116,3 +144,28 @@ fun SettingsScreen(
         }
     }
 }
+
+@Composable
+private fun SettingsFact(
+    label: String,
+    value: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+}
+
+private val DecoderExtensionMode.label: String
+    get() = when (this) {
+        DecoderExtensionMode.PlatformOnly -> "Platform only"
+        DecoderExtensionMode.UseAfterPlatform -> "Platform first, extensions after"
+        DecoderExtensionMode.PreferExtensions -> "Extensions preferred"
+    }
