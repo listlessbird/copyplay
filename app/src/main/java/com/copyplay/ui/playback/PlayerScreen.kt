@@ -44,17 +44,21 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-import com.copyplay.domain.playback.PlaybackSpeedPreset
+import com.copyplay.domain.playback.DecoderExtensionMode
+import com.copyplay.domain.playback.PlaybackCompatibilityPolicy
+import com.copyplay.domain.playback.PlaybackErrorClassifier
 import com.copyplay.domain.playback.PlaybackErrorMapper
 import com.copyplay.domain.playback.PlaybackFailureKind
 import com.copyplay.domain.playback.PlaybackFailureMessage
 import com.copyplay.domain.playback.PlaybackProgressStore
 import com.copyplay.domain.playback.PlaybackRequest
 import com.copyplay.domain.playback.PlaybackSession
+import com.copyplay.domain.playback.PlaybackSpeedPreset
 import com.copyplay.domain.playback.PlaybackSubtitleTrack
 import com.copyplay.domain.playback.PlayerAudioFocusPolicy
 import com.copyplay.domain.playback.PlayerGesturePolicy
@@ -88,8 +92,10 @@ fun PlayerScreen(
     var playerResizeMode by remember(session) { mutableStateOf(PlayerResizeMode.Fit) }
     var gestureMessage by remember(session) { mutableStateOf<String?>(null) }
     val player = remember(session) {
+        val compatibilitySettings = PlaybackCompatibilityPolicy.defaultSettings()
         val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setExtensionRendererMode(compatibilitySettings.decoderExtensionMode.toMedia3ExtensionRendererMode())
+            .setEnableDecoderFallback(compatibilitySettings.enableDecoderFallback)
         ExoPlayer.Builder(context, renderersFactory)
             .setPauseAtEndOfMediaItems(!session.autoplayNext)
             .build()
@@ -361,12 +367,14 @@ private fun Player.progressSnapshot(session: PlaybackSession) =
     )
 
 private fun PlaybackException.toFailureKind(): PlaybackFailureKind {
-    val codeName = errorCodeName.uppercase()
-    return when {
-        codeName.contains("IO") || codeName.contains("NETWORK") -> PlaybackFailureKind.NetworkOrServer
-        codeName.contains("DECOD") || codeName.contains("FORMAT") -> PlaybackFailureKind.UnsupportedCodec
-        else -> PlaybackFailureKind.Unexpected
+    if (this is ExoPlaybackException && type == ExoPlaybackException.TYPE_SOURCE) {
+        return PlaybackFailureKind.NetworkOrServer
     }
+    return PlaybackErrorClassifier.fromMedia3Error(
+        errorCodeName = errorCodeName,
+        isRendererError = this is ExoPlaybackException && type == ExoPlaybackException.TYPE_RENDERER,
+        technicalMessage = localizedMessage,
+    )
 }
 
 private val PlayerResizeMode.label: String
@@ -379,6 +387,13 @@ private fun PlayerResizeMode.toMedia3ResizeMode(): Int =
     when (this) {
         PlayerResizeMode.Fit -> AspectRatioFrameLayout.RESIZE_MODE_FIT
         PlayerResizeMode.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    }
+
+private fun DecoderExtensionMode.toMedia3ExtensionRendererMode(): Int =
+    when (this) {
+        DecoderExtensionMode.PlatformOnly -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+        DecoderExtensionMode.UseAfterPlatform -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+        DecoderExtensionMode.PreferExtensions -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
     }
 
 private fun Float.formatSpeed(): String =
