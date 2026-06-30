@@ -31,15 +31,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.copyplay.domain.browser.FolderEntry
-import com.copyplay.domain.playback.PlaybackRequest
-import com.copyplay.domain.playback.PlaybackRequestFactory
+import com.copyplay.domain.browser.FolderListing
 import com.copyplay.domain.server.ServerConfig
 
 @Composable
 fun BrowserScreen(
     viewModel: BrowserViewModel,
     configuredServer: ServerConfig?,
-    onOpenVideo: (PlaybackRequest) -> Unit,
+    onOpenVideo: (FolderListing, FolderEntry.Video) -> Unit,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -124,7 +123,7 @@ private fun BrowserContent(
     state: BrowserUiState,
     configuredServer: ServerConfig?,
     onOpen: (FolderEntry) -> Unit,
-    onOpenVideo: (PlaybackRequest) -> Unit,
+    onOpenVideo: (FolderListing, FolderEntry.Video) -> Unit,
     onRefresh: () -> Unit,
 ) {
     when {
@@ -195,6 +194,7 @@ private fun BrowserContent(
                 ) { entry ->
                     FolderEntryRow(
                         entry = entry,
+                        listing = state.listing,
                         configuredServer = configuredServer,
                         onOpen = onOpen,
                         onOpenVideo = onOpenVideo,
@@ -213,9 +213,10 @@ private fun BrowserContent(
 @Composable
 private fun FolderEntryRow(
     entry: FolderEntry,
+    listing: FolderListing,
     configuredServer: ServerConfig?,
     onOpen: (FolderEntry) -> Unit,
-    onOpenVideo: (PlaybackRequest) -> Unit,
+    onOpenVideo: (FolderListing, FolderEntry.Video) -> Unit,
 ) {
     val typeLabel = when (entry) {
         is FolderEntry.Directory -> "Folder"
@@ -230,9 +231,7 @@ private fun FolderEntryRow(
             ) {
                 when (entry) {
                     is FolderEntry.Directory -> onOpen(entry)
-                    is FolderEntry.Video -> configuredServer?.let {
-                        onOpenVideo(PlaybackRequestFactory.fromFolderVideo(it, entry))
-                    }
+                    is FolderEntry.Video -> if (configuredServer != null) onOpenVideo(listing, entry)
                 }
             }
             .padding(vertical = 14.dp),

@@ -36,6 +36,8 @@ private fun CopyplayRoot(container: CopyplayContainer) {
             CopyplayApp(
                 viewModelFactory = CopyplayViewModelFactory(container),
                 appViewModel = viewModel(factory = CopyplayViewModelFactory(container)),
+                playbackSessionFactory = container.playbackSessionFactory,
+                playbackProgressStore = container.playbackProgressStore,
             )
         }
     }

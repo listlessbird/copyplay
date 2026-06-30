@@ -1,19 +1,24 @@
 package com.copyplay.ui.playback
 
 import androidx.annotation.OptIn
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,25 +38,34 @@ import androidx.media3.ui.PlayerView
 import com.copyplay.domain.playback.PlaybackErrorMapper
 import com.copyplay.domain.playback.PlaybackFailureKind
 import com.copyplay.domain.playback.PlaybackFailureMessage
+import com.copyplay.domain.playback.PlaybackProgressStore
 import com.copyplay.domain.playback.PlaybackRequest
+import com.copyplay.domain.playback.PlaybackSession
+import com.copyplay.domain.playback.progressSnapshot
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
-    request: PlaybackRequest?,
+    session: PlaybackSession?,
+    progressStore: PlaybackProgressStore,
     onBack: () -> Unit,
 ) {
-    if (request == null) {
+    if (session == null) {
         MissingPlaybackRequest(onBack)
         return
     }
 
     val context = LocalContext.current
-    var failure by remember(request.url) { mutableStateOf<PlaybackFailureMessage?>(null) }
-    val player = remember(request.url) {
+    val scope = rememberCoroutineScope()
+    var failure by remember(session) { mutableStateOf<PlaybackFailureMessage?>(null) }
+    var currentIndex by remember(session) { mutableStateOf(session.currentIndex) }
+    val player = remember(session) {
         val renderersFactory = DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         ExoPlayer.Builder(context, renderersFactory)
+            .setPauseAtEndOfMediaItems(!session.autoplayNext)
             .build()
             .apply {
                 setAudioAttributes(
@@ -61,7 +75,11 @@ fun PlayerScreen(
                         .build(),
                     true,
                 )
-                setMediaItem(request.toMediaItem())
+                setMediaItems(
+                    session.playlist.map { it.request.toMediaItem() },
+                    session.currentIndex,
+                    session.startPositionMillis,
+                )
                 playWhenReady = true
                 prepare()
             }
@@ -79,11 +97,36 @@ fun PlayerScreen(
             override fun onPlayerErrorChanged(error: PlaybackException?) {
                 if (error == null) failure = null
             }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                currentIndex = player.currentMediaItemIndex
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    scope.launch {
+                        player.progressSnapshot(session)?.let { progressStore.save(it) }
+                    }
+                }
+            }
         }
         player.addListener(listener)
         onDispose {
+            val finalProgress = player.progressSnapshot(session)
+            if (finalProgress != null) {
+                scope.launch {
+                    progressStore.save(finalProgress)
+                }
+            }
             player.removeListener(listener)
             player.release()
+        }
+    }
+
+    LaunchedEffect(player, session) {
+        while (true) {
+            delay(5_000)
+            player.progressSnapshot(session)?.let { progressStore.save(it) }
         }
     }
 
@@ -100,13 +143,36 @@ fun PlayerScreen(
             update = { it.player = player },
         )
 
-        Button(
+        FlowRow(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp),
-            onClick = onBack,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Back")
+            Button(onClick = onBack) {
+                Text("Back")
+            }
+            OutlinedButton(
+                enabled = currentIndex > 0,
+                onClick = { player.seekToPreviousMediaItem() },
+            ) {
+                Text("Previous")
+            }
+            OutlinedButton(
+                enabled = player.hasNextMediaItem(),
+                onClick = { player.seekToNextMediaItem() },
+            ) {
+                Text("Next")
+            }
+            OutlinedButton(
+                onClick = {
+                    player.seekTo(player.currentMediaItemIndex, 0)
+                    player.playWhenReady = true
+                },
+            ) {
+                Text("Start over")
+            }
         }
 
         failure?.let { message ->
@@ -160,6 +226,14 @@ private fun PlaybackRequest.toMediaItem(): MediaItem =
                 .build(),
         )
         .build()
+
+private fun Player.progressSnapshot(session: PlaybackSession) =
+    session.progressSnapshot(
+        mediaItemIndex = currentMediaItemIndex,
+        positionMillis = currentPosition,
+        durationMillis = duration.takeIf { it != C.TIME_UNSET },
+        updatedAtEpochMillis = System.currentTimeMillis(),
+    )
 
 private fun PlaybackException.toFailureKind(): PlaybackFailureKind {
     val codeName = errorCodeName.uppercase()

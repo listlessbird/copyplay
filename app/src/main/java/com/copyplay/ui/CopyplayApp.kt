@@ -3,6 +3,7 @@ package com.copyplay.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -10,7 +11,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.copyplay.domain.playback.PlaybackRequest
+import com.copyplay.domain.playback.PlaybackSession
+import com.copyplay.domain.playback.PlaybackStartMode
+import com.copyplay.domain.playback.PlaybackSessionFactory
+import com.copyplay.domain.playback.PlaybackProgressStore
 import com.copyplay.ui.browser.BrowserScreen
 import com.copyplay.ui.browser.BrowserViewModel
 import com.copyplay.ui.home.HomeScreen
@@ -19,13 +23,17 @@ import com.copyplay.ui.settings.SettingsScreen
 import com.copyplay.ui.settings.SettingsViewModel
 import com.copyplay.ui.setup.SetupScreen
 import com.copyplay.ui.setup.SetupViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun CopyplayApp(
     viewModelFactory: CopyplayViewModelFactory,
     appViewModel: CopyplayAppViewModel,
+    playbackSessionFactory: PlaybackSessionFactory,
+    playbackProgressStore: PlaybackProgressStore,
 ) {
     val navController = rememberNavController()
+    val scope = rememberCoroutineScope()
     val launchState = appViewModel.launchState.collectAsStateWithLifecycle()
     if (launchState.value == AppLaunchState.Loading) {
         LoadingScreen()
@@ -33,7 +41,7 @@ fun CopyplayApp(
     }
 
     val configuredServer = (launchState.value as? AppLaunchState.Configured)?.serverConfig
-    var playbackRequest by remember { mutableStateOf<PlaybackRequest?>(null) }
+    var playbackSession by remember { mutableStateOf<PlaybackSession?>(null) }
     val startDestination = when (launchState.value) {
         AppLaunchState.FirstRun -> CopyplayRoute.Setup.name
         is AppLaunchState.Configured -> CopyplayRoute.Home.name
@@ -69,9 +77,15 @@ fun CopyplayApp(
             BrowserScreen(
                 viewModel = browserViewModel,
                 configuredServer = configuredServer,
-                onOpenVideo = { request ->
-                    playbackRequest = request
-                    navController.navigate(CopyplayRoute.Player.name)
+                onOpenVideo = { listing, video ->
+                    scope.launch {
+                        playbackSession = playbackSessionFactory.fromFolderSelection(
+                            listing = listing,
+                            selectedVideo = video,
+                            startMode = PlaybackStartMode.Resume,
+                        )
+                        navController.navigate(CopyplayRoute.Player.name)
+                    }
                 },
                 onBack = { navController.popBackStack() },
             )
@@ -79,7 +93,8 @@ fun CopyplayApp(
 
         composable(CopyplayRoute.Player.name) {
             PlayerScreen(
-                request = playbackRequest,
+                session = playbackSession,
+                progressStore = playbackProgressStore,
                 onBack = { navController.popBackStack() },
             )
         }

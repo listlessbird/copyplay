@@ -26,6 +26,7 @@ class CopyplayViewModelFactory(
                 SettingsViewModel(
                     serverConfigStore = container.serverConfigStore,
                     serverConnectionRepository = container.serverConnectionRepository,
+                    playbackPreferencesStore = container.playbackPreferencesStore,
                 ) as T
 
             else -> error("Unknown ViewModel: ${modelClass.name}")

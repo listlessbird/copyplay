@@ -141,6 +141,75 @@ If `ServerConnectionRepository` were deleted, setup and settings would each need
 
 If `CopypartyListingClient` were deleted, Ktor and copyparty JSON details would leak into the connection and browser modules. That would create a shallow interface for future folder browsing.
 
+### Playback session module
+
+Seam for issue 05:
+
+```kotlin
+interface PlaybackSessionFactory {
+    suspend fun fromFolderSelection(
+        listing: FolderListing,
+        selectedVideo: FolderEntry.Video,
+        startMode: PlaybackStartMode,
+    ): PlaybackSession
+}
+```
+
+Interface facts:
+
+- `PlaybackSession` carries the folder-local video playlist, selected index, resume position, and autoplay-next setting.
+- Playlist items are built from the current folder's visible video entries, preserving the browser's natural video ordering.
+- Progress identity is server base URL plus file path plus size and modified timestamp when present.
+- Resume is immediate for partially watched items; `PlaybackStartMode.StartOver` forces position `0`.
+- The player receives a ready-to-play session and does not rebuild folder ordering, progress identity, or preference rules.
+
+Depth:
+
+The module hides playlist construction, progress lookup, resume thresholds, and autoplay preference lookup behind one interface. If this module were deleted, browser and player modules would both need to relearn progress identity and folder ordering, losing locality.
+
+### Playback progress module
+
+Seam for issue 05:
+
+```kotlin
+interface PlaybackProgressStore {
+    suspend fun get(identity: PlaybackIdentity): PlaybackProgress?
+    suspend fun save(progress: PlaybackProgress)
+}
+```
+
+Interface facts:
+
+- Progress is saved only after playback passes 30 seconds.
+- Continue-watching eligibility is greater than 2% and less than 90% watched.
+- At or beyond 90% watched is treated as completed.
+- The store persists recently played entries for the later home module without requiring a media-library scan.
+
+Depth:
+
+The module keeps DataStore keys, JSON encoding, pruning, and threshold calculations away from UI callers. Tests can cross the same interface as the player and home modules.
+
+### Playback preferences module
+
+Seam for issue 05:
+
+```kotlin
+interface PlaybackPreferencesStore {
+    val preferences: Flow<PlaybackPreferences>
+    suspend fun setAutoplayNext(enabled: Boolean)
+}
+```
+
+Interface facts:
+
+- Autoplay next defaults to enabled.
+- Settings can disable autoplay without knowing Media3 playlist details.
+- The player maps the preference to Media3 `pauseAtEndOfMediaItems` behavior.
+
+Depth:
+
+This keeps preference persistence and Media3 playback behavior separate. The preference module is small but real because it has two callers: settings and playback session creation.
+
 ## Checkpoint Scope
 
-This document covers issue 01 and the seams it creates for issues 02 through 04. It intentionally does not design subtitle, decoder, gesture, PiP, or progress interfaces yet; those should be planned when their prerequisite modules exist.
+This document covers issues 01 through 05. It intentionally does not design subtitle, decoder, gesture, PiP, or home interfaces yet; those should be planned when their prerequisite modules exist.

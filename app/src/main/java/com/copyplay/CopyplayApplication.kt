@@ -2,8 +2,10 @@ package com.copyplay
 
 import android.app.Application
 import com.copyplay.data.browser.SqliteFolderListingCache
+import com.copyplay.data.playback.DataStorePlaybackStore
 import com.copyplay.data.server.DataStoreServerConfigStore
 import com.copyplay.domain.browser.CopypartyFolderRepository
+import com.copyplay.domain.playback.PlaybackSessionFactory
 import com.copyplay.domain.server.ServerConnectionRepository
 import com.copyplay.network.copyparty.CopypartyHttpClientFactory
 import com.copyplay.network.copyparty.KtorCopypartyListingClient
@@ -15,6 +17,7 @@ class CopyplayApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val store = DataStoreServerConfigStore(this)
+        val playbackStore = DataStorePlaybackStore(this)
         val folderCache = SqliteFolderListingCache(this)
         val listingClient = KtorCopypartyListingClient(CopypartyHttpClientFactory.create())
         container = CopyplayContainer(
@@ -26,6 +29,12 @@ class CopyplayApplication : Application() {
             serverConnectionRepository = ServerConnectionRepository(
                 listingClient = listingClient,
                 serverConfigStore = store,
+            ),
+            playbackProgressStore = playbackStore,
+            playbackPreferencesStore = playbackStore,
+            playbackSessionFactory = PlaybackSessionFactory(
+                progressStore = playbackStore,
+                preferencesStore = playbackStore,
             ),
         )
     }

@@ -3,6 +3,7 @@ package com.copyplay.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.copyplay.data.server.ServerConfigStore
+import com.copyplay.domain.playback.PlaybackPreferencesStore
 import com.copyplay.domain.server.ServerConnectionRepository
 import com.copyplay.domain.server.ServerConnectionResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     serverConfigStore: ServerConfigStore,
     private val serverConnectionRepository: ServerConnectionRepository,
+    private val playbackPreferencesStore: PlaybackPreferencesStore,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = mutableState
@@ -25,6 +27,11 @@ class SettingsViewModel(
                 if (!state.value.isSaving) {
                     mutableState.update { it.copy(baseUrl = serverConfig?.baseUrl.orEmpty()) }
                 }
+            }
+            .launchIn(viewModelScope)
+        playbackPreferencesStore.preferences
+            .onEach { preferences ->
+                mutableState.update { it.copy(autoplayNext = preferences.autoplayNext) }
             }
             .launchIn(viewModelScope)
     }
@@ -56,10 +63,18 @@ class SettingsViewModel(
             }
         }
     }
+
+    fun setAutoplayNext(enabled: Boolean) {
+        mutableState.update { it.copy(autoplayNext = enabled) }
+        viewModelScope.launch {
+            playbackPreferencesStore.setAutoplayNext(enabled)
+        }
+    }
 }
 
 data class SettingsUiState(
     val baseUrl: String = "",
+    val autoplayNext: Boolean = true,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
     val savedMessage: String? = null,
