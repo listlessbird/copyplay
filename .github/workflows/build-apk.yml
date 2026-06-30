@@ -6,7 +6,7 @@ on:
       - master
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -37,3 +37,23 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/debug/*.apk)
+          test "${#apks[@]}" -gt 0
+
+          tag="apk-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          notes_file="$(mktemp)"
+          printf 'Debug APK built from %s.\n\nRun: %s\n' "$GITHUB_SHA" "$RUN_URL" > "$notes_file"
+
+          gh release create "$tag" "${apks[@]}" \
+            --target "$GITHUB_SHA" \
+            --title "Copyplay debug APK ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+            --notes-file "$notes_file" \
+            --prerelease \
+            --latest=false
