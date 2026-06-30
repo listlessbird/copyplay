@@ -7,6 +7,8 @@ plugins {
 android {
     namespace = "com.copyplay"
     compileSdk = 36
+    val localCopypartyUrl = providers.gradleProperty("copyplay.localCopypartyUrl")
+        .orElse("http://10.0.2.2:3923/")
 
     defaultConfig {
         applicationId = "com.copyplay"
@@ -20,6 +22,16 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField("String", "DEFAULT_SERVER_URL", "\"${localCopypartyUrl.get()}\"")
+        }
+        release {
+            buildConfigField("String", "DEFAULT_SERVER_URL", "\"\"")
+        }
     }
 
     compileOptions {

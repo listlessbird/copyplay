@@ -27,6 +27,24 @@ class PlayerControlsTest {
     }
 
     @Test
+    fun `decoder button cycles through hardware plus software and hardware`() {
+        assertEquals(PlayerDecoderMode.Software, PlayerDecoderMode.HardwarePlus.next())
+        assertEquals(PlayerDecoderMode.Hardware, PlayerDecoderMode.Software.next())
+        assertEquals(PlayerDecoderMode.HardwarePlus, PlayerDecoderMode.Hardware.next())
+    }
+
+    @Test
+    fun `decoder modes map to Media3 extension renderer priority`() {
+        assertEquals(DecoderExtensionMode.PlatformOnly, PlayerDecoderMode.Hardware.toDecoderExtensionMode())
+        assertEquals(DecoderExtensionMode.UseAfterPlatform, PlayerDecoderMode.HardwarePlus.toDecoderExtensionMode())
+        assertEquals(DecoderExtensionMode.PreferExtensions, PlayerDecoderMode.Software.toDecoderExtensionMode())
+        assertEquals(
+            PlayerDecoderMode.HardwarePlus,
+            PlayerDecoderMode.fromDecoderExtensionMode(DecoderExtensionMode.UseAfterPlatform),
+        )
+    }
+
+    @Test
     fun `double tap seeks by ten seconds and clamps to duration`() {
         assertEquals(
             0L,

@@ -6,6 +6,7 @@ import com.copyplay.data.playback.DataStorePlaybackStore
 import com.copyplay.data.server.DataStoreServerConfigStore
 import com.copyplay.domain.browser.CopypartyFolderRepository
 import com.copyplay.domain.playback.PlaybackSessionFactory
+import com.copyplay.domain.server.ServerConfig
 import com.copyplay.domain.server.ServerConnectionRepository
 import com.copyplay.network.copyparty.CopypartyHttpClientFactory
 import com.copyplay.network.copyparty.KtorCopypartyListingClient
@@ -16,7 +17,13 @@ class CopyplayApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        val store = DataStoreServerConfigStore(this)
+        val defaultServerConfig = BuildConfig.DEFAULT_SERVER_URL
+            .takeIf { it.isNotBlank() }
+            ?.let(::ServerConfig)
+        val store = DataStoreServerConfigStore(
+            context = this,
+            defaultServerConfig = defaultServerConfig,
+        )
         val playbackStore = DataStorePlaybackStore(this)
         val folderCache = SqliteFolderListingCache(this)
         val listingClient = KtorCopypartyListingClient(CopypartyHttpClientFactory.create())

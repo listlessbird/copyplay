@@ -35,6 +35,36 @@ enum class PlayerOrientationMode {
         }
 }
 
+enum class PlayerDecoderMode {
+    Hardware,
+    HardwarePlus,
+    Software,
+    ;
+
+    fun next(): PlayerDecoderMode =
+        when (this) {
+            HardwarePlus -> Software
+            Software -> Hardware
+            Hardware -> HardwarePlus
+        }
+
+    fun toDecoderExtensionMode(): DecoderExtensionMode =
+        when (this) {
+            Hardware -> DecoderExtensionMode.PlatformOnly
+            HardwarePlus -> DecoderExtensionMode.UseAfterPlatform
+            Software -> DecoderExtensionMode.PreferExtensions
+        }
+
+    companion object {
+        fun fromDecoderExtensionMode(mode: DecoderExtensionMode): PlayerDecoderMode =
+            when (mode) {
+                DecoderExtensionMode.PlatformOnly -> Hardware
+                DecoderExtensionMode.UseAfterPlatform -> HardwarePlus
+                DecoderExtensionMode.PreferExtensions -> Software
+            }
+    }
+}
+
 enum class SeekSide {
     Backward,
     Forward,

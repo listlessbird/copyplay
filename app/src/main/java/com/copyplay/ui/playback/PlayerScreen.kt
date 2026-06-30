@@ -6,12 +6,14 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.util.Rational
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.Window
 import android.view.WindowInsets
@@ -51,12 +53,16 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
+import androidx.media3.ui.TrackSelectionDialogBuilder
 import androidx.lifecycle.lifecycleScope
 import com.copyplay.domain.playback.DecoderExtensionMode
 import com.copyplay.domain.playback.PlaybackCompatibilityPolicy
@@ -70,6 +76,7 @@ import com.copyplay.domain.playback.PlaybackSession
 import com.copyplay.domain.playback.PlaybackSpeedPreset
 import com.copyplay.domain.playback.PlaybackSubtitleTrack
 import com.copyplay.domain.playback.PlayerAudioFocusPolicy
+import com.copyplay.domain.playback.PlayerDecoderMode
 import com.copyplay.domain.playback.PlayerGesturePolicy
 import com.copyplay.domain.playback.PlayerOrientationMode
 import com.copyplay.domain.playback.PlayerPictureInPicturePolicy
@@ -81,7 +88,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-private const val PlayerControllerTimeoutMs = 3_500
+private const val PlayerChromeTimeoutMs = 3_500L
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -102,10 +109,27 @@ fun PlayerScreen(
     var failure by remember(session) { mutableStateOf<PlaybackFailureMessage?>(null) }
     var currentIndex by remember(session) { mutableStateOf(session.currentIndex) }
     var isPlaying by remember(session) { mutableStateOf(false) }
+    var playbackState by remember(session) { mutableStateOf(Player.STATE_IDLE) }
+    var positionMillis by remember(session) { mutableStateOf(session.startPositionMillis) }
+    var durationMillis by remember(session) { mutableStateOf<Long?>(null) }
+    var bufferedPercentage by remember(session) { mutableStateOf(0) }
+    var hasAudioTracks by remember(session) { mutableStateOf(false) }
+    var hasSubtitleTracks by remember(session) { mutableStateOf(false) }
     var hudVisible by remember(session) { mutableStateOf(true) }
     var playbackSpeed by remember(session) { mutableStateOf(1.0f) }
     var playerResizeMode by remember(session) { mutableStateOf(PlayerResizeMode.Fit) }
     var playerOrientationMode by remember(session) { mutableStateOf(PlayerOrientationMode.System) }
+    var playerDecoderMode by remember(session) {
+        mutableStateOf(
+            PlayerDecoderMode.fromDecoderExtensionMode(
+                PlaybackCompatibilityPolicy.defaultSettings().decoderExtensionMode,
+            ),
+        )
+    }
+    var requestedMediaItemIndex by remember(session) { mutableStateOf(session.currentIndex) }
+    var requestedStartPositionMillis by remember(session) { mutableStateOf(session.startPositionMillis) }
+    var requestedPlayWhenReady by remember(session) { mutableStateOf(true) }
+    var videoScale by remember(session) { mutableStateOf(1f) }
     var gestureMessage by remember(session) { mutableStateOf<String?>(null) }
     val originalRequestedOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -113,10 +137,10 @@ fun PlayerScreen(
     val originalScreenBrightness = remember(activity) {
         activity?.window?.attributes?.screenBrightness ?: -1f
     }
-    val player = remember(session) {
+    val player = remember(session, playerDecoderMode) {
         val compatibilitySettings = PlaybackCompatibilityPolicy.defaultSettings()
         val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(compatibilitySettings.decoderExtensionMode.toMedia3ExtensionRendererMode())
+            .setExtensionRendererMode(playerDecoderMode.toDecoderExtensionMode().toMedia3ExtensionRendererMode())
             .setEnableDecoderFallback(compatibilitySettings.enableDecoderFallback)
         ExoPlayer.Builder(context, renderersFactory)
             .setPauseAtEndOfMediaItems(!session.autoplayNext)
@@ -134,10 +158,11 @@ fun PlayerScreen(
                 )
                 setMediaItems(
                     session.playlist.map { it.request.toMediaItem() },
-                    session.currentIndex,
-                    session.startPositionMillis,
+                    requestedMediaItemIndex.coerceIn(0, session.playlist.lastIndex),
+                    requestedStartPositionMillis,
                 )
-                playWhenReady = true
+                playWhenReady = requestedPlayWhenReady
+                setPlaybackSpeed(playbackSpeed)
                 prepare()
             }
     }
@@ -176,19 +201,29 @@ fun PlayerScreen(
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 currentIndex = player.currentMediaItemIndex
+                positionMillis = player.currentPosition.coerceAtLeast(0)
+                durationMillis = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+                bufferedPercentage = player.bufferedPercentage
+                hudVisible = true
             }
 
             override fun onIsPlayingChanged(isPlayingNow: Boolean) {
                 isPlaying = isPlayingNow
             }
 
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
+            override fun onPlaybackStateChanged(newPlaybackState: Int) {
+                playbackState = newPlaybackState
+                if (newPlaybackState == Player.STATE_ENDED) {
                     hudVisible = true
                     scope.launch {
                         player.progressSnapshot(session)?.let { progressStore.save(it) }
                     }
                 }
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                hasAudioTracks = tracks.hasTrackType(C.TRACK_TYPE_AUDIO)
+                hasSubtitleTracks = tracks.hasTrackType(C.TRACK_TYPE_TEXT)
             }
         }
         player.addListener(listener)
@@ -212,6 +247,23 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(hudVisible, isPlaying, failure) {
+        activity?.setPlayerSystemBarsVisible(hudVisible || failure != null)
+        if (hudVisible && isPlaying && failure == null) {
+            delay(PlayerChromeTimeoutMs)
+            hudVisible = false
+        }
+    }
+
+    LaunchedEffect(player, session) {
+        while (true) {
+            positionMillis = player.currentPosition.coerceAtLeast(0)
+            durationMillis = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+            bufferedPercentage = player.bufferedPercentage
+            delay(500)
+        }
+    }
+
     LaunchedEffect(player, session) {
         while (true) {
             delay(5_000)
@@ -225,25 +277,10 @@ fun PlayerScreen(
             factory = { viewContext ->
                 PlayerView(viewContext).apply {
                     this.player = player
-                    useController = true
-                    controllerShowTimeoutMs = PlayerControllerTimeoutMs
+                    useController = false
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                     resizeMode = playerResizeMode.toMedia3ResizeMode()
-                    setShowPreviousButton(false)
-                    setShowNextButton(false)
-                    setShowFastForwardButton(false)
-                    setShowRewindButton(false)
-                    setControllerHideOnTouch(false)
-                    setControllerAutoShow(true)
-                    setShowSubtitleButton(true)
-                    subtitleView?.setUserDefaultStyle()
-                    subtitleView?.setUserDefaultTextSize()
-                    setControllerVisibilityListener(
-                        PlayerView.ControllerVisibilityListener { visibility ->
-                            val visible = visibility == View.VISIBLE
-                            hudVisible = visible
-                            activity?.setPlayerSystemBarsVisible(visible)
-                        },
-                    )
+                    subtitleView?.applyCopyplaySubtitleStyle()
                     val audioManager = viewContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                     val detector = GestureDetector(
                         viewContext,
@@ -252,18 +289,57 @@ fun PlayerScreen(
                             player = player,
                             window = activity?.window,
                             audioManager = audioManager,
-                            isControllerVisible = { hudVisible },
-                            onFeedback = { gestureMessage = it },
+                            onToggleChrome = {
+                                hudVisible = !hudVisible
+                                activity?.setPlayerSystemBarsVisible(hudVisible)
+                            },
+                            onFeedback = {
+                                gestureMessage = it
+                                hudVisible = false
+                            },
                         ),
                     )
+                    val scaleDetector = ScaleGestureDetector(
+                        viewContext,
+                        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                                playerResizeMode = PlayerResizeMode.Crop
+                                hudVisible = false
+                                return true
+                            }
+
+                            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                                videoScale = (videoScale * detector.scaleFactor)
+                                    .coerceIn(1f, 3f)
+                                videoSurfaceView?.scaleX = videoScale
+                                videoSurfaceView?.scaleY = videoScale
+                                gestureMessage = "${(videoScale * 100).toInt()}%"
+                                return true
+                            }
+
+                            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                                if (videoScale < 1.02f) {
+                                    videoScale = 1f
+                                    playerResizeMode = PlayerResizeMode.Fit
+                                }
+                            }
+                        },
+                    )
                     setOnTouchListener { _, event ->
-                        detector.onTouchEvent(event)
+                        scaleDetector.onTouchEvent(event)
+                        if (!scaleDetector.isInProgress) {
+                            detector.onTouchEvent(event)
+                        }
+                        true
                     }
                 }
             },
             update = {
                 it.player = player
                 it.resizeMode = playerResizeMode.toMedia3ResizeMode()
+                it.subtitleView?.applyCopyplaySubtitleStyle()
+                it.videoSurfaceView?.scaleX = videoScale
+                it.videoSurfaceView?.scaleY = videoScale
             },
         )
 
@@ -274,10 +350,18 @@ fun PlayerScreen(
             state = PlayerChromeState(
                 visible = hudVisible || failure != null,
                 title = session.playlist.getOrNull(currentIndex)?.title ?: session.currentItem.title,
+                isPlaying = isPlaying,
+                isBuffering = playbackState == Player.STATE_BUFFERING,
+                positionMillis = positionMillis,
+                durationMillis = durationMillis,
+                bufferedPercentage = bufferedPercentage,
                 hasPrevious = currentIndex > 0,
                 hasNext = player.hasNextMediaItem(),
+                hasAudioTracks = hasAudioTracks,
+                hasSubtitleTracks = hasSubtitleTracks,
                 speedLabel = "${playbackSpeed.formatSpeed()}x",
                 resizeLabel = playerResizeMode.label,
+                decoderLabel = playerDecoderMode.label,
                 orientationLabel = playerOrientationMode.label,
                 showPictureInPicture = pictureInPictureSupported,
                 canEnterPictureInPicture = pictureInPictureSupported &&
@@ -291,9 +375,50 @@ fun PlayerScreen(
                 onBack = { exitPlayer() },
                 onPrevious = { player.seekToPreviousMediaItem() },
                 onNext = { player.seekToNextMediaItem() },
+                onSeekBack = {
+                    player.seekTo(
+                        PlayerGesturePolicy.doubleTapSeekTarget(
+                            side = SeekSide.Backward,
+                            currentPositionMillis = player.currentPosition,
+                            durationMillis = player.duration.takeIf { it != C.TIME_UNSET },
+                        ),
+                    )
+                },
+                onSeekForward = {
+                    player.seekTo(
+                        PlayerGesturePolicy.doubleTapSeekTarget(
+                            side = SeekSide.Forward,
+                            currentPositionMillis = player.currentPosition,
+                            durationMillis = player.duration.takeIf { it != C.TIME_UNSET },
+                        ),
+                    )
+                },
+                onPlayPause = {
+                    if (player.isPlaying) player.pause() else player.play()
+                    hudVisible = true
+                },
+                onSeekTo = { targetMillis ->
+                    player.seekTo(targetMillis)
+                    positionMillis = targetMillis
+                    hudVisible = true
+                },
                 onStartOver = {
                     player.seekTo(player.currentMediaItemIndex, 0)
                     player.playWhenReady = true
+                },
+                onAudioTracks = {
+                    context.showTrackSelectionDialog(
+                        title = "Audio",
+                        player = player,
+                        trackType = C.TRACK_TYPE_AUDIO,
+                    )
+                },
+                onSubtitleTracks = {
+                    context.showTrackSelectionDialog(
+                        title = "Subtitles",
+                        player = player,
+                        trackType = C.TRACK_TYPE_TEXT,
+                    )
                 },
                 onChangeSpeed = {
                     val nextSpeed = PlaybackSpeedPreset.nextAfter(playbackSpeed)
@@ -301,8 +426,18 @@ fun PlayerScreen(
                     player.setPlaybackSpeed(nextSpeed)
                     gestureMessage = "Speed ${nextSpeed.formatSpeed()}x"
                 },
+                onChangeDecoder = {
+                    val nextDecoderMode = playerDecoderMode.next()
+                    requestedMediaItemIndex = player.currentMediaItemIndex.coerceAtLeast(0)
+                    requestedStartPositionMillis = player.currentPosition.coerceAtLeast(0)
+                    requestedPlayWhenReady = player.playWhenReady
+                    playerDecoderMode = nextDecoderMode
+                    gestureMessage = "Decoder ${nextDecoderMode.label}"
+                    hudVisible = true
+                },
                 onToggleResize = {
                     playerResizeMode = playerResizeMode.next()
+                    videoScale = 1f
                     gestureMessage = playerResizeMode.label
                 },
                 onRotate = {
@@ -454,6 +589,13 @@ private val PlayerOrientationMode.label: String
         PlayerOrientationMode.Portrait -> "Portrait"
     }
 
+private val PlayerDecoderMode.label: String
+    get() = when (this) {
+        PlayerDecoderMode.Hardware -> "HW"
+        PlayerDecoderMode.HardwarePlus -> "HW+"
+        PlayerDecoderMode.Software -> "SW"
+    }
+
 private fun Activity.applyPlayerOrientation(mode: PlayerOrientationMode) {
     requestedOrientation = when (mode) {
         PlayerOrientationMode.System -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -467,6 +609,37 @@ private fun PlayerResizeMode.toMedia3ResizeMode(): Int =
         PlayerResizeMode.Fit -> AspectRatioFrameLayout.RESIZE_MODE_FIT
         PlayerResizeMode.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     }
+
+private fun Tracks.hasTrackType(trackType: Int): Boolean =
+    groups.any { group -> group.type == trackType && group.length > 0 }
+
+@OptIn(UnstableApi::class)
+private fun Context.showTrackSelectionDialog(
+    title: String,
+    player: Player,
+    trackType: Int,
+) {
+    TrackSelectionDialogBuilder(this, title, player, trackType)
+        .setShowDisableOption(trackType == C.TRACK_TYPE_TEXT)
+        .build()
+        .show()
+}
+
+private fun SubtitleView.applyCopyplaySubtitleStyle() {
+    setStyle(
+        CaptionStyleCompat(
+            android.graphics.Color.WHITE,
+            android.graphics.Color.TRANSPARENT,
+            android.graphics.Color.TRANSPARENT,
+            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            android.graphics.Color.BLACK,
+            Typeface.create(Typeface.DEFAULT, Typeface.BOLD),
+        ),
+    )
+    setApplyEmbeddedStyles(true)
+    setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f)
+    setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION)
+}
 
 private fun DecoderExtensionMode.toMedia3ExtensionRendererMode(): Int =
     when (this) {
@@ -536,7 +709,7 @@ private class PlayerGestureTouchListener(
     private val player: Player,
     private val window: Window?,
     private val audioManager: AudioManager,
-    private val isControllerVisible: () -> Boolean,
+    private val onToggleChrome: () -> Unit,
     private val onFeedback: (String) -> Unit,
 ) : GestureDetector.SimpleOnGestureListener() {
     private val gestureBorderPx = 24f
@@ -555,11 +728,7 @@ private class PlayerGestureTouchListener(
     }
 
     override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
-        if (isControllerVisible() && player.isPlaying) {
-            playerView.hideController()
-        } else {
-            playerView.showController()
-        }
+        onToggleChrome()
         return true
     }
 

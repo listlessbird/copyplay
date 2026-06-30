@@ -18,11 +18,12 @@ private val Context.serverConfigDataStore by preferencesDataStore(name = "server
 
 class DataStoreServerConfigStore(
     context: Context,
+    private val defaultServerConfig: ServerConfig? = null,
 ) : ServerConfigStore {
     private val dataStore = context.serverConfigDataStore
 
     override val configuredServer: Flow<ServerConfig?> = dataStore.data.map { preferences ->
-        preferences[BaseUrlKey]?.let(::ServerConfig)
+        preferences[BaseUrlKey]?.let(::ServerConfig) ?: defaultServerConfig
     }
 
     override val savedServers: Flow<List<SavedServerHost>> = dataStore.data.map { preferences ->
