@@ -276,6 +276,35 @@ Depth:
 
 The module keeps touch math and platform eligibility rules out of the Compose screen. The UI can remain an adapter over Media3 and Android window/audio APIs, while tests cover the behavior that would otherwise be trapped inside a gesture listener.
 
+### Playback compatibility module
+
+Seam for issue 08:
+
+```kotlin
+object PlaybackCompatibilityPolicy {
+    fun defaultSettings(): PlaybackCompatibilitySettings
+}
+
+object PlaybackErrorClassifier {
+    fun fromMedia3Error(
+        errorCodeName: String,
+        isRendererError: Boolean,
+        technicalMessage: String?,
+    ): PlaybackFailureKind
+}
+```
+
+Interface facts:
+
+- Default compatibility keeps Media3 platform decoders first and enables extension renderers after platform decoders when they are present in the app build.
+- Decoder fallback is enabled so Media3 can try lower-priority decoders after initialization failure.
+- Native FFmpeg is explicitly not bundled in the current app build; `.scratch/copyparty-video-player/docs/playback-compatibility.md` records the NDK, ABI, licensing, and APK-size tradeoffs.
+- Media3 source errors classify as network/server failures, while renderer, decoding, codec, and format failures classify as unsupported codec failures.
+
+Depth:
+
+The module keeps renderer policy, native-extension packaging decisions, and playback error classification out of the Compose player. The player remains a small adapter over Media3 `DefaultRenderersFactory` and `PlaybackException`.
+
 ## Checkpoint Scope
 
-This document covers issues 01 through 07. It intentionally does not design decoder or home interfaces yet; those should be planned when their prerequisite modules exist.
+This document covers issues 01 through 08. It intentionally does not design home interfaces yet; those should be planned when their prerequisite modules exist.
