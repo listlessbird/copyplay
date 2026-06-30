@@ -7,6 +7,7 @@ import com.copyplay.domain.server.CopypartyListingClient
 import com.copyplay.domain.server.CopypartyListingResult
 import com.copyplay.domain.server.CopypartyRemoteEntry
 import com.copyplay.domain.server.ServerConfig
+import java.util.ArrayDeque
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -62,13 +63,54 @@ class BrowserViewModelTest {
         assertFalse(viewModel.state.value.isRefreshing)
         assertEquals(CopypartyPath.Root, viewModel.state.value.path)
     }
+
+    @Test
+    fun `stale cache renders immediately and refreshes in background`() = runTest {
+        val client = RecordingListingClient(
+            responses = ArrayDeque(
+                listOf(
+                    CopypartyListingResult.Success(
+                        directories = emptyList(),
+                        files = listOf(remoteEntry("Fresh.mkv")),
+                    ),
+                ),
+            ),
+        )
+        val cache = InMemoryFolderListingCache()
+        cache.put(
+            listing = com.copyplay.domain.browser.buildFolderListing(
+                server = ServerConfig("http://copybox.local"),
+                path = CopypartyPath.Root,
+                directories = emptyList(),
+                files = listOf(remoteEntry("Cached.mkv")),
+            ),
+            fetchedAtEpochMillis = 0,
+        )
+        val viewModel = BrowserViewModel(
+            CopypartyFolderRepository(
+                listingClient = client,
+                cache = cache,
+                clock = { 10_000 },
+                staleAfterMillis = 1_000,
+            ),
+        )
+
+        viewModel.loadInitial(ServerConfig("http://copybox.local"))
+        advanceUntilIdle()
+
+        assertEquals(listOf(CopypartyPath.Root), client.requestedPaths)
+        assertEquals(listOf("Fresh.mkv"), viewModel.state.value.listing?.visibleEntries?.map { it.name })
+    }
 }
 
-private class RecordingListingClient : CopypartyListingClient {
+private class RecordingListingClient(
+    private val responses: ArrayDeque<CopypartyListingResult> = ArrayDeque(),
+) : CopypartyListingClient {
     val requestedPaths = mutableListOf<CopypartyPath>()
 
     override suspend fun listFolder(baseUrl: String, path: CopypartyPath): CopypartyListingResult {
         requestedPaths += path
+        responses.poll()?.let { return it }
         return if (path.isRoot) {
             CopypartyListingResult.Success(
                 directories = listOf(remoteEntry("Season%201/", ext = "---")),
@@ -93,6 +135,26 @@ private fun remoteEntry(
         ext = ext,
         modifiedEpochSeconds = 123,
     )
+
+private class InMemoryFolderListingCache : com.copyplay.domain.browser.FolderListingCache {
+    private val listings = mutableMapOf<String, com.copyplay.domain.browser.CachedFolderListing>()
+
+    override suspend fun get(
+        server: ServerConfig,
+        path: CopypartyPath,
+    ): com.copyplay.domain.browser.CachedFolderListing? = listings[key(server, path)]
+
+    override suspend fun put(
+        listing: com.copyplay.domain.browser.FolderListing,
+        fetchedAtEpochMillis: Long,
+    ) {
+        listings[key(listing.server, listing.path)] =
+            com.copyplay.domain.browser.CachedFolderListing(listing, fetchedAtEpochMillis)
+    }
+
+    private fun key(server: ServerConfig, path: CopypartyPath): String =
+        "${server.baseUrl}|${path.encodedRelativePath()}"
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainDispatcherRule(

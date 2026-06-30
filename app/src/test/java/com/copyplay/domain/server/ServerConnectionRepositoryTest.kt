@@ -53,7 +53,9 @@ class ServerConnectionRepositoryTest {
     @Test
     fun `non http url is rejected before calling copyparty`() = runTest {
         val store = InMemoryServerConfigStore()
-        val client = FakeCopypartyListingClient(CopypartyListingResult.Success(directories = emptyList(), files = emptyList()))
+        val client = FakeCopypartyListingClient(
+            CopypartyListingResult.Success(directories = emptyList(), files = emptyList()),
+        )
         val repository = ServerConnectionRepository(client, store)
 
         val result = repository.validateAndSave("ftp://copybox.local/media")

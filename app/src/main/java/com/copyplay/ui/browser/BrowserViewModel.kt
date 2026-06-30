@@ -7,6 +7,7 @@ import com.copyplay.domain.browser.CopypartyPath
 import com.copyplay.domain.browser.FolderEntry
 import com.copyplay.domain.browser.FolderListing
 import com.copyplay.domain.browser.FolderLoadResult
+import com.copyplay.domain.browser.RefreshMode
 import com.copyplay.domain.server.ServerConfig
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,28 +37,28 @@ class BrowserViewModel(
 
         if (activeServer == server && state.value.listing != null) return
         activeServer = server
-        loadPath(server, CopypartyPath.Root, refreshing = false)
+        loadPath(server, CopypartyPath.Root, refreshing = false, refreshMode = RefreshMode.AllowCache)
     }
 
     fun open(entry: FolderEntry) {
         if (entry is FolderEntry.Directory) {
-            activeServer?.let { loadPath(it, entry.path, refreshing = false) }
+            activeServer?.let { loadPath(it, entry.path, refreshing = false, refreshMode = RefreshMode.AllowCache) }
         }
     }
 
     fun openBreadcrumb(path: CopypartyPath) {
-        activeServer?.let { loadPath(it, path, refreshing = false) }
+        activeServer?.let { loadPath(it, path, refreshing = false, refreshMode = RefreshMode.AllowCache) }
     }
 
     fun refresh() {
         val server = activeServer ?: return
-        loadPath(server, state.value.path, refreshing = true)
+        loadPath(server, state.value.path, refreshing = true, refreshMode = RefreshMode.ForceNetwork)
     }
 
     fun navigateParent(): Boolean {
         val parent = state.value.path.parent() ?: return false
         val server = activeServer ?: return false
-        loadPath(server, parent, refreshing = false)
+        loadPath(server, parent, refreshing = false, refreshMode = RefreshMode.AllowCache)
         return true
     }
 
@@ -65,6 +66,7 @@ class BrowserViewModel(
         server: ServerConfig,
         path: CopypartyPath,
         refreshing: Boolean,
+        refreshMode: RefreshMode,
     ) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
@@ -77,7 +79,7 @@ class BrowserViewModel(
                 )
             }
 
-            when (val result = folderRepository.loadFolder(server, path)) {
+            when (val result = folderRepository.loadFolder(server, path, refreshMode)) {
                 is FolderLoadResult.Success -> {
                     mutableState.update {
                         it.copy(
@@ -88,12 +90,16 @@ class BrowserViewModel(
                             errorMessage = null,
                         )
                     }
+                    if (result.isStale && refreshMode == RefreshMode.AllowCache) {
+                        loadPath(server, path, refreshing = true, refreshMode = RefreshMode.ForceNetwork)
+                    }
                 }
 
                 is FolderLoadResult.Failure -> {
                     mutableState.update {
                         it.copy(
                             path = path,
+                            listing = result.cachedListing ?: it.listing,
                             isLoading = false,
                             isRefreshing = false,
                             errorMessage = result.message,

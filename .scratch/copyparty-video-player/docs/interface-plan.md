@@ -92,6 +92,28 @@ Depth:
 
 The browser UI learns one method and one domain model. If the repository were deleted, every browser caller would need to relearn copyparty JSON, video/subtitle extension rules, and sorting. Keeping those facts local makes issue 03 cache replacement straightforward: the cache can become another adapter behind the same folder seam.
 
+### Folder cache module
+
+Seam for issue 03:
+
+```kotlin
+interface FolderListingCache {
+    suspend fun get(server: ServerConfig, path: CopypartyPath): CachedFolderListing?
+    suspend fun put(listing: FolderListing, fetchedAtEpochMillis: Long)
+}
+```
+
+Interface facts:
+
+- The cache key is server base URL plus folder path.
+- Cached payloads preserve folder path, visible children, hidden subtitle candidates, size, modified time, and fetched timestamp.
+- `CopypartyFolderRepository` owns cache policy: cache hit, cache miss, stale detection, forced refresh, and fallback when a network refresh fails.
+- The UI receives `FolderLoadResult` values and never knows whether persistence is SQLite, Room, or another adapter.
+
+Depth:
+
+This module keeps persistence format, SQLite table names, JSON encoding, timestamps, and stale policy out of the browser UI. The cache has two adapters in practice: the SQLite implementation used by the app and in-memory fakes used by tests, so this is a real seam rather than a hypothetical one.
+
 ### Playback module
 
 Expected seam for issue 04:

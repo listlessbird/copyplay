@@ -7,29 +7,73 @@ import com.copyplay.domain.server.ServerConfig
 
 class CopypartyFolderRepository(
     private val listingClient: CopypartyListingClient,
+    private val cache: FolderListingCache = NoopFolderListingCache,
+    private val clock: Clock = SystemClock,
+    private val staleAfterMillis: Long = DefaultStaleAfterMillis,
 ) {
     suspend fun loadFolder(
         server: ServerConfig,
         path: CopypartyPath,
+        refreshMode: RefreshMode = RefreshMode.AllowCache,
     ): FolderLoadResult {
+        val cached = cache.get(server, path)
+        if (refreshMode == RefreshMode.AllowCache && cached != null) {
+            return FolderLoadResult.Success(
+                listing = cached.listing,
+                source = FolderListingSource.Cache,
+                isStale = clock.nowEpochMillis() - cached.fetchedAtEpochMillis >= staleAfterMillis,
+            )
+        }
+
         return when (val result = listingClient.listFolder(server.baseUrl, path)) {
-            is CopypartyListingResult.Success -> FolderLoadResult.Success(
-                buildFolderListing(
+            is CopypartyListingResult.Success -> {
+                val listing = buildFolderListing(
                     server = server,
                     path = path,
                     directories = result.directories,
                     files = result.files,
-                ),
-            )
+                )
+                cache.put(listing, clock.nowEpochMillis())
+                FolderLoadResult.Success(
+                    listing = listing,
+                    source = FolderListingSource.Network,
+                    isStale = false,
+                )
+            }
 
-            is CopypartyListingResult.Failure -> FolderLoadResult.Failure(result.toBrowserMessage())
+            is CopypartyListingResult.Failure -> FolderLoadResult.Failure(
+                message = result.toBrowserMessage(),
+                cachedListing = cached?.listing,
+            )
         }
+    }
+
+    private companion object {
+        const val DefaultStaleAfterMillis = 5 * 60 * 1000L
     }
 }
 
+enum class RefreshMode {
+    AllowCache,
+    ForceNetwork,
+}
+
+enum class FolderListingSource {
+    Cache,
+    Network,
+}
+
 sealed interface FolderLoadResult {
-    data class Success(val listing: FolderListing) : FolderLoadResult
-    data class Failure(val message: String) : FolderLoadResult
+    data class Success(
+        val listing: FolderListing,
+        val source: FolderListingSource,
+        val isStale: Boolean,
+    ) : FolderLoadResult
+
+    data class Failure(
+        val message: String,
+        val cachedListing: FolderListing? = null,
+    ) : FolderLoadResult
 }
 
 private fun CopypartyListingResult.Failure.toBrowserMessage(): String =
