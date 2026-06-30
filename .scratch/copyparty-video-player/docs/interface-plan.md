@@ -305,6 +305,30 @@ Depth:
 
 The module keeps renderer policy, native-extension packaging decisions, and playback error classification out of the Compose player. The player remains a small adapter over Media3 `DefaultRenderersFactory` and `PlaybackException`.
 
+### Home feed module
+
+Seam for issue 09:
+
+```kotlin
+object HomeFeedPolicy {
+    fun fromProgress(entries: List<PlaybackProgress>): HomeFeed
+    fun startModeFor(item: HomeVideoItem): PlaybackStartMode
+}
+```
+
+Interface facts:
+
+- Home is derived from persisted playback progress only; it does not use folder history or media-library classification.
+- Continue Watching contains progress entries whose watch status is `ContinueWatching`.
+- Recently Played contains persisted started videos sorted by latest update, including completed videos.
+- Entries below the progress-save threshold are excluded even if a test or future importer provides them.
+- Continue rows resume; completed or not-started recent rows start over.
+- Home playback handoff uses `PlaybackSessionFactory.fromProgressEntry` to build a single-item session from the saved identity.
+
+Depth:
+
+The module keeps progress filtering, ordering, and start-mode policy out of Compose. The UI renders a feed and dispatches item clicks; it does not know progress thresholds or identity-to-URL construction.
+
 ## Checkpoint Scope
 
-This document covers issues 01 through 08. It intentionally does not design home interfaces yet; those should be planned when their prerequisite modules exist.
+This document covers issues 01 through 09. Final settings and verification remain for issue 10.
