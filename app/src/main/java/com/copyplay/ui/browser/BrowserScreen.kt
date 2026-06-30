@@ -31,12 +31,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.copyplay.domain.browser.FolderEntry
+import com.copyplay.domain.playback.PlaybackRequest
+import com.copyplay.domain.playback.PlaybackRequestFactory
 import com.copyplay.domain.server.ServerConfig
 
 @Composable
 fun BrowserScreen(
     viewModel: BrowserViewModel,
     configuredServer: ServerConfig?,
+    onOpenVideo: (PlaybackRequest) -> Unit,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -82,7 +85,9 @@ fun BrowserScreen(
         ) {
             BrowserContent(
                 state = state,
+                configuredServer = configuredServer,
                 onOpen = viewModel::open,
+                onOpenVideo = onOpenVideo,
                 onRefresh = viewModel::refresh,
             )
         }
@@ -117,7 +122,9 @@ private fun Breadcrumbs(
 @Composable
 private fun BrowserContent(
     state: BrowserUiState,
+    configuredServer: ServerConfig?,
     onOpen: (FolderEntry) -> Unit,
+    onOpenVideo: (PlaybackRequest) -> Unit,
     onRefresh: () -> Unit,
 ) {
     when {
@@ -186,7 +193,12 @@ private fun BrowserContent(
                     items = state.listing.visibleEntries,
                     key = { entry -> "${entry::class.simpleName}:${entry.path.encodedRelativePath()}" },
                 ) { entry ->
-                    FolderEntryRow(entry = entry, onOpen = onOpen)
+                    FolderEntryRow(
+                        entry = entry,
+                        configuredServer = configuredServer,
+                        onOpen = onOpen,
+                        onOpenVideo = onOpenVideo,
+                    )
                     HorizontalDivider()
                 }
 
@@ -201,7 +213,9 @@ private fun BrowserContent(
 @Composable
 private fun FolderEntryRow(
     entry: FolderEntry,
+    configuredServer: ServerConfig?,
     onOpen: (FolderEntry) -> Unit,
+    onOpenVideo: (PlaybackRequest) -> Unit,
 ) {
     val typeLabel = when (entry) {
         is FolderEntry.Directory -> "Folder"
@@ -211,7 +225,16 @@ private fun FolderEntryRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = entry is FolderEntry.Directory) { onOpen(entry) }
+            .clickable(
+                enabled = entry is FolderEntry.Directory || (entry is FolderEntry.Video && configuredServer != null),
+            ) {
+                when (entry) {
+                    is FolderEntry.Directory -> onOpen(entry)
+                    is FolderEntry.Video -> configuredServer?.let {
+                        onOpenVideo(PlaybackRequestFactory.fromFolderVideo(it, entry))
+                    }
+                }
+            }
             .padding(vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {

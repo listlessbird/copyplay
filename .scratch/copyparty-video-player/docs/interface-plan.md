@@ -116,15 +116,24 @@ This module keeps persistence format, SQLite table names, JSON encoding, timesta
 
 ### Playback module
 
-Expected seam for issue 04:
+Seam for issue 04:
 
 ```kotlin
-interface PlaybackSessionFactory {
-    fun createSession(request: PlaybackRequest): PlaybackSession
+interface PlaybackRequestFactory {
+    fun fromFolderVideo(server: ServerConfig, entry: FolderEntry.Video): PlaybackRequest
 }
 ```
 
-The interface should accept a folder-local video selection and return a playback session model. Media3, direct HTTP URL construction, player-state mapping, and error classification belong behind this seam.
+Interface facts:
+
+- `PlaybackRequest` carries the server, file path, display title, and direct HTTP/HTTPS URL.
+- The browser only hands off a selected `FolderEntry.Video`; it does not build URLs or know Media3 details.
+- `PlaybackErrorMapper` classifies network/source, decoder/renderer, and unexpected playback failures into user-facing messages.
+- The Compose player route hosts Media3 through Android View interop, but playback URL construction and error wording remain plain Kotlin test surfaces.
+
+Depth:
+
+This keeps direct URL construction, percent encoding, Media3 error vocabulary, and user-facing failure language behind a small interface. The first adapter is Media3-backed; tests use plain playback request/error mapping without needing an Android player instance.
 
 ## Deletion Test
 

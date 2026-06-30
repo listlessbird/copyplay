@@ -1,14 +1,20 @@
 package com.copyplay.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.copyplay.domain.playback.PlaybackRequest
 import com.copyplay.ui.browser.BrowserScreen
 import com.copyplay.ui.browser.BrowserViewModel
 import com.copyplay.ui.home.HomeScreen
+import com.copyplay.ui.playback.PlayerScreen
 import com.copyplay.ui.settings.SettingsScreen
 import com.copyplay.ui.settings.SettingsViewModel
 import com.copyplay.ui.setup.SetupScreen
@@ -27,6 +33,7 @@ fun CopyplayApp(
     }
 
     val configuredServer = (launchState.value as? AppLaunchState.Configured)?.serverConfig
+    var playbackRequest by remember { mutableStateOf<PlaybackRequest?>(null) }
     val startDestination = when (launchState.value) {
         AppLaunchState.FirstRun -> CopyplayRoute.Setup.name
         is AppLaunchState.Configured -> CopyplayRoute.Home.name
@@ -62,6 +69,17 @@ fun CopyplayApp(
             BrowserScreen(
                 viewModel = browserViewModel,
                 configuredServer = configuredServer,
+                onOpenVideo = { request ->
+                    playbackRequest = request
+                    navController.navigate(CopyplayRoute.Player.name)
+                },
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(CopyplayRoute.Player.name) {
+            PlayerScreen(
+                request = playbackRequest,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -80,5 +98,6 @@ private enum class CopyplayRoute {
     Setup,
     Home,
     Browser,
+    Player,
     Settings,
 }
