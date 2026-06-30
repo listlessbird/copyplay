@@ -253,6 +253,29 @@ Depth:
 
 This keeps track enumeration, override application, and embedded track parsing behind Media3's tested player UI module. A custom module would become worth adding when Copyplay needs persisted per-file track IDs or app-specific track labels.
 
+### Player control policy module
+
+Seam for issue 07:
+
+```kotlin
+object PlayerGesturePolicy {
+    fun doubleTapSeekTarget(side: SeekSide, currentPositionMillis: Long, durationMillis: Long?): Long
+    fun horizontalScrubTarget(dragDistancePx: Float, density: Float, startPositionMillis: Long, durationMillis: Long?): Long
+    fun verticalTarget(startX: Float, viewWidth: Int, borderPx: Float): VerticalGestureTarget?
+}
+```
+
+Interface facts:
+
+- Playback speed stepping, resize mode toggling, gesture-to-seek mapping, vertical brightness/volume routing, PiP eligibility, and noisy-route handling are plain Kotlin policies.
+- The player UI owns Android side effects: Media3 speed/seek calls, `PlayerView` resize mode, activity brightness, music-stream volume, and `PictureInPictureParams`.
+- The gesture policy follows the Just Player reference values where applicable: 10 second double-tap seek, capped horizontal scrub deltas, left-side brightness, right-side volume, and ignored edge regions.
+- Audio focus remains Media3-owned through `setAudioAttributes(..., true)`; Copyplay only configures phone playback to pause sensibly on headphone or route changes.
+
+Depth:
+
+The module keeps touch math and platform eligibility rules out of the Compose screen. The UI can remain an adapter over Media3 and Android window/audio APIs, while tests cover the behavior that would otherwise be trapped inside a gesture listener.
+
 ## Checkpoint Scope
 
-This document covers issues 01 through 06. It intentionally does not design decoder, gesture, PiP, or home interfaces yet; those should be planned when their prerequisite modules exist.
+This document covers issues 01 through 07. It intentionally does not design decoder or home interfaces yet; those should be planned when their prerequisite modules exist.
