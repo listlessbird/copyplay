@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -41,6 +42,7 @@ import com.copyplay.domain.playback.PlaybackFailureMessage
 import com.copyplay.domain.playback.PlaybackProgressStore
 import com.copyplay.domain.playback.PlaybackRequest
 import com.copyplay.domain.playback.PlaybackSession
+import com.copyplay.domain.playback.PlaybackSubtitleTrack
 import com.copyplay.domain.playback.progressSnapshot
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -138,6 +140,9 @@ fun PlayerScreen(
                     this.player = player
                     useController = true
                     controllerShowTimeoutMs = 3_000
+                    setShowSubtitleButton(true)
+                    subtitleView?.setUserDefaultStyle()
+                    subtitleView?.setUserDefaultTextSize()
                 }
             },
             update = { it.player = player },
@@ -219,6 +224,7 @@ private fun MissingPlaybackRequest(onBack: () -> Unit) {
 private fun PlaybackRequest.toMediaItem(): MediaItem =
     MediaItem.Builder()
         .setUri(url)
+        .setSubtitleConfigurations(subtitleTracks.map { it.toSubtitleConfiguration() })
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title)
@@ -226,6 +232,21 @@ private fun PlaybackRequest.toMediaItem(): MediaItem =
                 .build(),
         )
         .build()
+
+private fun PlaybackSubtitleTrack.toSubtitleConfiguration(): MediaItem.SubtitleConfiguration {
+    val selectionFlags = when {
+        isForced -> C.SELECTION_FLAG_FORCED
+        isDefault -> C.SELECTION_FLAG_DEFAULT
+        else -> 0
+    }
+    return MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
+        .setMimeType(mimeType)
+        .setLanguage(language)
+        .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
+        .setSelectionFlags(selectionFlags)
+        .setLabel(label)
+        .build()
+}
 
 private fun Player.progressSnapshot(session: PlaybackSession) =
     session.progressSnapshot(
