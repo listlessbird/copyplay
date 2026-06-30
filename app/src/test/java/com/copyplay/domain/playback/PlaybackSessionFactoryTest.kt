@@ -21,6 +21,7 @@ class PlaybackSessionFactoryTest {
             directories = listOf(remoteEntry("Extras/", ext = "---")),
             files = listOf(
                 remoteEntry("Episode 10.mkv"),
+                remoteEntry("Episode 2.en.srt"),
                 remoteEntry("Episode 2.mkv"),
                 remoteEntry("cover.jpg", ext = "jpg"),
                 remoteEntry("Episode 1.mkv"),
@@ -38,6 +39,19 @@ class PlaybackSessionFactoryTest {
         assertEquals(true, session.hasPrevious)
         assertEquals(true, session.hasNext)
         assertEquals("http://copybox.local:3923/TV/Season%201/Episode%202.mkv", session.currentItem.request.url)
+        assertEquals(
+            listOf(
+                PlaybackSubtitleTrack(
+                    url = "http://copybox.local:3923/TV/Season%201/Episode%202.en.srt",
+                    label = "Episode 2.en.srt",
+                    mimeType = SubtitleMimeTypes.SubRip,
+                    language = "en",
+                    isForced = false,
+                    isDefault = false,
+                ),
+            ),
+            session.currentItem.request.subtitleTracks,
+        )
     }
 
     @Test

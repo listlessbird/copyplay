@@ -8,18 +8,21 @@ data class PlaybackRequest(
     val pathSegments: List<String>,
     val title: String,
     val url: String,
+    val subtitleTracks: List<PlaybackSubtitleTrack> = emptyList(),
 )
 
 object PlaybackRequestFactory {
     fun fromFolderVideo(
         server: ServerConfig,
         video: FolderEntry.Video,
+        subtitleTracks: List<PlaybackSubtitleTrack> = emptyList(),
     ): PlaybackRequest =
         PlaybackRequest(
             server = server,
             pathSegments = video.path.segments,
             title = video.name,
             url = directFileUrl(server, video.path.segments),
+            subtitleTracks = subtitleTracks,
         )
 }
 

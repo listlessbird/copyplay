@@ -54,7 +54,15 @@ class PlaybackSessionFactory(
             .map { video ->
                 PlaybackItem(
                     identity = PlaybackIdentity.from(listing.server, video),
-                    request = PlaybackRequestFactory.fromFolderVideo(listing.server, video),
+                    request = PlaybackRequestFactory.fromFolderVideo(
+                        server = listing.server,
+                        video = video,
+                        subtitleTracks = SidecarSubtitleMatcher.match(
+                            server = listing.server,
+                            video = video,
+                            hiddenSubtitles = listing.hiddenSubtitles,
+                        ),
+                    ),
                 )
             }
         val selectedIdentity = PlaybackIdentity.from(listing.server, selectedVideo)
