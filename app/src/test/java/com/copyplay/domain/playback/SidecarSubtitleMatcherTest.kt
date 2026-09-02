@@ -87,6 +87,45 @@ class SidecarSubtitleMatcherTest {
         )
     }
 
+    @Test
+    fun `matches common subtitle qualifiers without accepting unrelated files`() {
+        val matched = SidecarSubtitleMatcher.match(
+            server = ServerConfig("http://copybox.local"),
+            video = video("Movie.mkv"),
+            hiddenSubtitles = listOf(
+                subtitle("Movie.ass"),
+                subtitle("Movie.en.ass"),
+                subtitle("Movie.default.ass"),
+                subtitle("Movie.sdh.ass"),
+                subtitle("Movie.en.sdh.ass"),
+                subtitle("Movie.signs.ass"),
+                subtitle("Movie.en.signs.ass"),
+                subtitle("Movie.full.ass"),
+                subtitle("Movie.commentary.ass"),
+                subtitle("Movie.notes.ass"),
+                subtitle("Other.ass"),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                "Movie.ass",
+                "Movie.en.ass",
+                "Movie.default.ass",
+                "Movie.sdh.ass",
+                "Movie.en.sdh.ass",
+                "Movie.signs.ass",
+                "Movie.en.signs.ass",
+                "Movie.full.ass",
+                "Movie.commentary.ass",
+            ),
+            matched.map { it.label },
+        )
+        assertEquals(true, matched.single { it.label == "Movie.default.ass" }.isDefault)
+        assertEquals(null, matched.single { it.label == "Movie.sdh.ass" }.language)
+        assertEquals("en", matched.single { it.label == "Movie.en.sdh.ass" }.language)
+    }
+
     private fun video(path: String): FolderEntry.Video =
         FolderEntry.Video(
             name = path.substringAfterLast('/'),

@@ -27,7 +27,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.copyplay.domain.playback.DecoderExtensionMode
 import com.copyplay.domain.playback.PlaybackCompatibilityPolicy
 
 @Composable
@@ -158,23 +157,23 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.titleMedium,
                 )
                 SettingsFact(
-                    label = "Decoder priority",
-                    value = compatibilitySettings.decoderExtensionMode.label,
+                    label = "Default decoder",
+                    value = compatibilitySettings.defaultDecoderMode.name,
                 )
                 SettingsFact(
-                    label = "Decoder fallback",
-                    value = if (compatibilitySettings.enableDecoderFallback) "On" else "Off",
+                    label = "Hardware policy",
+                    value = compatibilitySettings.hardwareDecoderPolicy,
                 )
                 SettingsFact(
-                    label = "Native FFmpeg",
-                    value = if (compatibilitySettings.includesNativeFfmpegExtension) "Bundled" else "Not bundled",
+                    label = "FFmpeg",
+                    value = if (compatibilitySettings.includesFfmpeg) "Bundled with libmpv" else "Not bundled",
                 )
                 SettingsFact(
-                    label = "Subtitle style",
-                    value = "Android caption settings",
+                    label = "Subtitle renderer",
+                    value = compatibilitySettings.subtitleRenderer,
                 )
                 Text(
-                    text = "Format support still depends on device codecs unless a future build bundles native FFmpeg.",
+                    text = "Hardware playback uses MediaCodec when available and falls back to mpv's FFmpeg decoders.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -202,10 +201,3 @@ private fun SettingsFact(
         )
     }
 }
-
-private val DecoderExtensionMode.label: String
-    get() = when (this) {
-        DecoderExtensionMode.PlatformOnly -> "Platform only"
-        DecoderExtensionMode.UseAfterPlatform -> "Platform first, extensions after"
-        DecoderExtensionMode.PreferExtensions -> "Extensions preferred"
-    }

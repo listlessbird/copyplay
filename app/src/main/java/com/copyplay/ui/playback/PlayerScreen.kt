@@ -6,21 +6,19 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.media.AudioManager
-import android.net.Uri
 import android.os.Build
 import android.util.Rational
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.SurfaceView
 import android.view.View
 import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,36 +44,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.Tracks
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlaybackException
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.CaptionStyleCompat
-import androidx.media3.ui.PlayerView
-import androidx.media3.ui.SubtitleView
-import androidx.media3.ui.TrackSelectionDialogBuilder
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.copyplay.domain.playback.DecoderExtensionMode
-import com.copyplay.domain.playback.PlaybackCompatibilityPolicy
-import com.copyplay.domain.playback.PlaybackErrorClassifier
-import com.copyplay.domain.playback.PlaybackErrorMapper
-import com.copyplay.domain.playback.PlaybackFailureKind
-import com.copyplay.domain.playback.PlaybackFailureMessage
+import com.copyplay.data.playback.mpv.AndroidPlaybackAudioController
+import com.copyplay.data.playback.mpv.MpvPlaybackEngine
+import com.copyplay.domain.playback.PlaybackEngineEvent
 import com.copyplay.domain.playback.PlaybackProgressStore
-import com.copyplay.domain.playback.PlaybackRequest
+import com.copyplay.domain.playback.PlaybackPlaylistPolicy
 import com.copyplay.domain.playback.PlaybackSession
 import com.copyplay.domain.playback.PlaybackSpeedPreset
-import com.copyplay.domain.playback.PlaybackSubtitleTrack
-import com.copyplay.domain.playback.PlayerAudioFocusPolicy
+import com.copyplay.domain.playback.PlaybackTrackType
+import com.copyplay.domain.playback.PlaybackTermination
+import com.copyplay.domain.playback.PlaybackWatchStatus
 import com.copyplay.domain.playback.PlayerDecoderMode
 import com.copyplay.domain.playback.PlayerGesturePolicy
 import com.copyplay.domain.playback.PlayerOrientationMode
@@ -85,12 +67,13 @@ import com.copyplay.domain.playback.SeekSide
 import com.copyplay.domain.playback.VerticalGestureTarget
 import com.copyplay.domain.playback.progressSnapshot
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
 private const val PlayerChromeTimeoutMs = 3_500L
 
-@OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
     session: PlaybackSession?,
@@ -106,137 +89,152 @@ fun PlayerScreen(
     val activity = context.findActivity()
     val scope = rememberCoroutineScope()
     val progressScope = (activity as? ComponentActivity)?.lifecycleScope ?: scope
-    var failure by remember(session) { mutableStateOf<PlaybackFailureMessage?>(null) }
+    val activityLifecycle = (activity as? ComponentActivity)?.lifecycle
+    val engine = remember(session) { MpvPlaybackEngine(context.applicationContext) }
+    val engineState by engine.state.collectAsStateWithLifecycle()
     var currentIndex by remember(session) { mutableStateOf(session.currentIndex) }
-    var isPlaying by remember(session) { mutableStateOf(false) }
-    var playbackState by remember(session) { mutableStateOf(Player.STATE_IDLE) }
-    var positionMillis by remember(session) { mutableStateOf(session.startPositionMillis) }
-    var durationMillis by remember(session) { mutableStateOf<Long?>(null) }
-    var bufferedPercentage by remember(session) { mutableStateOf(0) }
-    var hasAudioTracks by remember(session) { mutableStateOf(false) }
-    var hasSubtitleTracks by remember(session) { mutableStateOf(false) }
     var hudVisible by remember(session) { mutableStateOf(true) }
     var playbackSpeed by remember(session) { mutableStateOf(1.0f) }
     var playerResizeMode by remember(session) { mutableStateOf(PlayerResizeMode.Fit) }
     var playerOrientationMode by remember(session) { mutableStateOf(PlayerOrientationMode.System) }
-    var playerDecoderMode by remember(session) {
-        mutableStateOf(
-            PlayerDecoderMode.fromDecoderExtensionMode(
-                PlaybackCompatibilityPolicy.defaultSettings().decoderExtensionMode,
-            ),
-        )
-    }
-    var requestedMediaItemIndex by remember(session) { mutableStateOf(session.currentIndex) }
-    var requestedStartPositionMillis by remember(session) { mutableStateOf(session.startPositionMillis) }
-    var requestedPlayWhenReady by remember(session) { mutableStateOf(true) }
+    var playerDecoderMode by remember(session) { mutableStateOf(PlayerDecoderMode.Hardware) }
     var videoScale by remember(session) { mutableStateOf(1f) }
     var gestureMessage by remember(session) { mutableStateOf<String?>(null) }
+    var trackDialog by remember(session) { mutableStateOf<PlaybackTrackType?>(null) }
+    val resumeAfterBackground = remember(session) { AtomicBoolean(false) }
     val originalRequestedOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
     val originalScreenBrightness = remember(activity) {
         activity?.window?.attributes?.screenBrightness ?: -1f
     }
-    val player = remember(session, playerDecoderMode) {
-        val compatibilitySettings = PlaybackCompatibilityPolicy.defaultSettings()
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(playerDecoderMode.toDecoderExtensionMode().toMedia3ExtensionRendererMode())
-            .setEnableDecoderFallback(compatibilitySettings.enableDecoderFallback)
-        ExoPlayer.Builder(context, renderersFactory)
-            .setPauseAtEndOfMediaItems(!session.autoplayNext)
-            .build()
-            .apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(C.USAGE_MEDIA)
-                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                        .build(),
-                    true,
-                )
-                setHandleAudioBecomingNoisy(
-                    PlayerAudioFocusPolicy.shouldHandleAudioRouteChanges(isTelevision = false),
-                )
-                setMediaItems(
-                    session.playlist.map { it.request.toMediaItem() },
-                    requestedMediaItemIndex.coerceIn(0, session.playlist.lastIndex),
-                    requestedStartPositionMillis,
-                )
-                playWhenReady = requestedPlayWhenReady
-                setPlaybackSpeed(playbackSpeed)
-                prepare()
-            }
+    val audioController = remember(engine) {
+        AndroidPlaybackAudioController(
+            context = context,
+            isPlaying = { engine.state.value.isPlaying },
+            onPause = engine::pause,
+            onResume = engine::play,
+        )
     }
-    fun saveProgressSnapshot() {
-        player.progressSnapshot(session)?.let { progress ->
-            progressScope.launch {
-                progressStore.save(progress)
-            }
+
+    fun progressSnapshot() =
+        session.progressSnapshot(
+            mediaItemIndex = currentIndex,
+            positionMillis = engine.state.value.positionMillis,
+            durationMillis = engine.state.value.durationMillis,
+            updatedAtEpochMillis = System.currentTimeMillis(),
+        )
+
+    suspend fun saveProgress() {
+        progressSnapshot()?.let { progressStore.save(it) }
+    }
+
+    suspend fun resumePosition(index: Int): Long {
+        val item = session.playlist.getOrNull(index) ?: return 0L
+        return progressStore.get(item.identity)
+            ?.takeIf { it.watchStatus == PlaybackWatchStatus.ContinueWatching }
+            ?.positionMillis
+            ?: 0L
+    }
+
+    fun moveTo(index: Int) {
+        if (index !in session.playlist.indices || index == currentIndex) return
+        scope.launch {
+            saveProgress()
+            val startPosition = resumePosition(index)
+            currentIndex = index
+            engine.load(
+                request = session.playlist[index].request,
+                startPositionMillis = startPosition,
+                playWhenReady = audioController.requestFocus(),
+            )
+            hudVisible = true
         }
     }
 
     fun exitPlayer() {
-        saveProgressSnapshot()
-        player.pause()
-        player.clearVideoSurface()
+        progressSnapshot()?.let { progress ->
+            progressScope.launch { progressStore.save(progress) }
+        }
+        engine.pause()
         activity?.setPlayerSystemBarsVisible(true)
         onBack()
     }
 
-    BackHandler {
-        exitPlayer()
-    }
+    BackHandler(onBack = ::exitPlayer)
 
-    DisposableEffect(player) {
-        val listener = object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) {
-                failure = PlaybackErrorMapper.messageFor(
-                    kind = error.toFailureKind(),
-                    technicalMessage = error.localizedMessage,
-                )
+    DisposableEffect(engine) {
+        audioController.start()
+        onDispose {
+            progressSnapshot()?.let { progress ->
+                progressScope.launch { progressStore.save(progress) }
             }
-
-            override fun onPlayerErrorChanged(error: PlaybackException?) {
-                if (error == null) failure = null
-            }
-
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                currentIndex = player.currentMediaItemIndex
-                positionMillis = player.currentPosition.coerceAtLeast(0)
-                durationMillis = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
-                bufferedPercentage = player.bufferedPercentage
-                hudVisible = true
-            }
-
-            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                isPlaying = isPlayingNow
-            }
-
-            override fun onPlaybackStateChanged(newPlaybackState: Int) {
-                playbackState = newPlaybackState
-                if (newPlaybackState == Player.STATE_ENDED) {
-                    hudVisible = true
-                    scope.launch {
-                        player.progressSnapshot(session)?.let { progressStore.save(it) }
-                    }
+            audioController.release()
+            engine.release()
+            activity?.let { playerActivity ->
+                if (playerActivity.requestedOrientation != originalRequestedOrientation) {
+                    playerActivity.requestedOrientation = originalRequestedOrientation
                 }
             }
-
-            override fun onTracksChanged(tracks: Tracks) {
-                hasAudioTracks = tracks.hasTrackType(C.TRACK_TYPE_AUDIO)
-                hasSubtitleTracks = tracks.hasTrackType(C.TRACK_TYPE_TEXT)
-            }
-        }
-        player.addListener(listener)
-        onDispose {
-            saveProgressSnapshot()
-            player.removeListener(listener)
-            player.pause()
-            player.clearVideoSurface()
-            player.clearMediaItems()
-            player.release()
-            activity?.requestedOrientation = originalRequestedOrientation
             activity?.restorePlayerScreenBrightness(originalScreenBrightness)
             activity?.setPlayerSystemBarsVisible(true)
+        }
+    }
+
+    DisposableEffect(activityLifecycle, engine) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    if (activity?.isInPictureInPictureMode != true && engine.state.value.playWhenReady) {
+                        resumeAfterBackground.set(true)
+                        engine.pause()
+                    }
+                }
+                Lifecycle.Event.ON_START -> if (resumeAfterBackground.compareAndSet(true, false)) {
+                    if (audioController.requestFocus()) engine.play()
+                }
+                else -> Unit
+            }
+        }
+        activityLifecycle?.addObserver(observer)
+        onDispose { activityLifecycle?.removeObserver(observer) }
+    }
+
+    LaunchedEffect(engine, session) {
+        engine.load(
+            request = session.currentItem.request,
+            startPositionMillis = session.startPositionMillis,
+            playWhenReady = audioController.requestFocus(),
+        )
+    }
+
+    LaunchedEffect(engine, session) {
+        engine.events.collectLatest { event ->
+            if (event == PlaybackEngineEvent.EndedNaturally) {
+                saveProgress()
+                val nextIndex = PlaybackPlaylistPolicy.nextIndex(
+                    session = session,
+                    currentIndex = currentIndex,
+                    termination = PlaybackTermination.NaturalEnd,
+                )
+                if (nextIndex != null) {
+                    currentIndex = nextIndex
+                    engine.load(
+                        request = session.playlist[nextIndex].request,
+                        startPositionMillis = resumePosition(nextIndex),
+                        playWhenReady = audioController.requestFocus(),
+                    )
+                } else {
+                    hudVisible = true
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(engine, currentIndex) {
+        while (true) {
+            delay(5_000)
+            if (engine.state.value.isPlaying) saveProgress()
         }
     }
 
@@ -247,99 +245,35 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(hudVisible, isPlaying, failure) {
-        activity?.setPlayerSystemBarsVisible(hudVisible || failure != null)
-        if (hudVisible && isPlaying && failure == null) {
+    LaunchedEffect(hudVisible, engineState.isPlaying, engineState.failure) {
+        activity?.setPlayerSystemBarsVisible(hudVisible || engineState.failure != null)
+        if (hudVisible && engineState.isPlaying && engineState.failure == null) {
             delay(PlayerChromeTimeoutMs)
             hudVisible = false
         }
     }
 
-    LaunchedEffect(player, session) {
-        while (true) {
-            positionMillis = player.currentPosition.coerceAtLeast(0)
-            durationMillis = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
-            bufferedPercentage = player.bufferedPercentage
-            delay(500)
-        }
-    }
-
-    LaunchedEffect(player, session) {
-        while (true) {
-            delay(5_000)
-            player.progressSnapshot(session)?.let { progressStore.save(it) }
-        }
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
-        AndroidView(
+        MpvVideoSurface(
+            controller = engine,
             modifier = Modifier.fillMaxSize(),
-            factory = { viewContext ->
-                PlayerView(viewContext).apply {
-                    this.player = player
-                    useController = false
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                    resizeMode = playerResizeMode.toMedia3ResizeMode()
-                    subtitleView?.applyCopyplaySubtitleStyle()
-                    val audioManager = viewContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    val detector = GestureDetector(
-                        viewContext,
-                        PlayerGestureTouchListener(
-                            playerView = this,
-                            player = player,
-                            window = activity?.window,
-                            audioManager = audioManager,
-                            onToggleChrome = {
-                                hudVisible = !hudVisible
-                                activity?.setPlayerSystemBarsVisible(hudVisible)
-                            },
-                            onFeedback = {
-                                gestureMessage = it
-                                hudVisible = false
-                            },
-                        ),
-                    )
-                    val scaleDetector = ScaleGestureDetector(
-                        viewContext,
-                        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                                playerResizeMode = PlayerResizeMode.Crop
-                                hudVisible = false
-                                return true
-                            }
-
-                            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                                videoScale = (videoScale * detector.scaleFactor)
-                                    .coerceIn(1f, 3f)
-                                videoSurfaceView?.scaleX = videoScale
-                                videoSurfaceView?.scaleY = videoScale
-                                gestureMessage = "${(videoScale * 100).toInt()}%"
-                                return true
-                            }
-
-                            override fun onScaleEnd(detector: ScaleGestureDetector) {
-                                if (videoScale < 1.02f) {
-                                    videoScale = 1f
-                                    playerResizeMode = PlayerResizeMode.Fit
-                                }
-                            }
-                        },
-                    )
-                    setOnTouchListener { _, event ->
-                        scaleDetector.onTouchEvent(event)
-                        if (!scaleDetector.isInProgress) {
-                            detector.onTouchEvent(event)
-                        }
-                        true
-                    }
-                }
-            },
-            update = {
-                it.player = player
-                it.resizeMode = playerResizeMode.toMedia3ResizeMode()
-                it.subtitleView?.applyCopyplaySubtitleStyle()
-                it.videoSurfaceView?.scaleX = videoScale
-                it.videoSurfaceView?.scaleY = videoScale
+            configureView = { view ->
+                configurePlayerGestures(
+                    view = view,
+                    engine = engine,
+                    window = activity?.window,
+                    onToggleChrome = {
+                        hudVisible = !hudVisible
+                        activity?.setPlayerSystemBarsVisible(hudVisible)
+                    },
+                    onResizeModeChanged = { playerResizeMode = it },
+                    scale = { videoScale },
+                    onScaleChanged = { videoScale = it },
+                    onFeedback = {
+                        gestureMessage = it
+                        hudVisible = false
+                    },
+                )
             },
         )
 
@@ -348,96 +282,84 @@ fun PlayerScreen(
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
         PlayerChrome(
             state = PlayerChromeState(
-                visible = hudVisible || failure != null,
+                visible = hudVisible || engineState.failure != null,
                 title = session.playlist.getOrNull(currentIndex)?.title ?: session.currentItem.title,
-                isPlaying = isPlaying,
-                isBuffering = playbackState == Player.STATE_BUFFERING,
-                positionMillis = positionMillis,
-                durationMillis = durationMillis,
-                bufferedPercentage = bufferedPercentage,
+                isPlaying = engineState.isPlaying,
+                isBuffering = engineState.isBuffering,
+                positionMillis = engineState.positionMillis,
+                durationMillis = engineState.durationMillis,
                 hasPrevious = currentIndex > 0,
-                hasNext = player.hasNextMediaItem(),
-                hasAudioTracks = hasAudioTracks,
-                hasSubtitleTracks = hasSubtitleTracks,
+                hasNext = currentIndex < session.playlist.lastIndex,
+                hasAudioTracks = engineState.audioTracks.isNotEmpty(),
+                hasSubtitleTracks = engineState.subtitleTracks.isNotEmpty(),
                 speedLabel = "${playbackSpeed.formatSpeed()}x",
                 resizeLabel = playerResizeMode.label,
-                decoderLabel = playerDecoderMode.label,
+                decoderLabel = playerDecoderMode.decoderLabel(engineState.activeHardwareDecoder),
                 orientationLabel = playerOrientationMode.label,
                 showPictureInPicture = pictureInPictureSupported,
                 canEnterPictureInPicture = pictureInPictureSupported &&
                     PlayerPictureInPicturePolicy.isEligible(
                         sdkInt = Build.VERSION.SDK_INT,
-                        isPlaying = isPlaying,
-                        hasVideo = true,
+                        isPlaying = engineState.isPlaying,
+                        hasVideo = engineState.hasVideo,
                     ),
             ),
             actions = PlayerChromeActions(
-                onBack = { exitPlayer() },
-                onPrevious = { player.seekToPreviousMediaItem() },
-                onNext = { player.seekToNextMediaItem() },
+                onBack = ::exitPlayer,
+                onPrevious = { moveTo(currentIndex - 1) },
+                onNext = { moveTo(currentIndex + 1) },
                 onSeekBack = {
-                    player.seekTo(
+                    engine.seekTo(
                         PlayerGesturePolicy.doubleTapSeekTarget(
                             side = SeekSide.Backward,
-                            currentPositionMillis = player.currentPosition,
-                            durationMillis = player.duration.takeIf { it != C.TIME_UNSET },
+                            currentPositionMillis = engineState.positionMillis,
+                            durationMillis = engineState.durationMillis,
                         ),
                     )
                 },
                 onSeekForward = {
-                    player.seekTo(
+                    engine.seekTo(
                         PlayerGesturePolicy.doubleTapSeekTarget(
                             side = SeekSide.Forward,
-                            currentPositionMillis = player.currentPosition,
-                            durationMillis = player.duration.takeIf { it != C.TIME_UNSET },
+                            currentPositionMillis = engineState.positionMillis,
+                            durationMillis = engineState.durationMillis,
                         ),
                     )
                 },
                 onPlayPause = {
-                    if (player.isPlaying) player.pause() else player.play()
+                    if (engineState.isPlaying) {
+                        engine.pause()
+                    } else if (audioController.requestFocus()) {
+                        engine.play()
+                    }
                     hudVisible = true
                 },
                 onSeekTo = { targetMillis ->
-                    player.seekTo(targetMillis)
-                    positionMillis = targetMillis
+                    engine.seekTo(targetMillis)
                     hudVisible = true
                 },
                 onStartOver = {
-                    player.seekTo(player.currentMediaItemIndex, 0)
-                    player.playWhenReady = true
+                    engine.seekTo(0)
+                    if (audioController.requestFocus()) engine.play()
                 },
-                onAudioTracks = {
-                    context.showTrackSelectionDialog(
-                        title = "Audio",
-                        player = player,
-                        trackType = C.TRACK_TYPE_AUDIO,
-                    )
-                },
-                onSubtitleTracks = {
-                    context.showTrackSelectionDialog(
-                        title = "Subtitles",
-                        player = player,
-                        trackType = C.TRACK_TYPE_TEXT,
-                    )
-                },
+                onAudioTracks = { trackDialog = PlaybackTrackType.Audio },
+                onSubtitleTracks = { trackDialog = PlaybackTrackType.Subtitle },
                 onChangeSpeed = {
-                    val nextSpeed = PlaybackSpeedPreset.nextAfter(playbackSpeed)
-                    playbackSpeed = nextSpeed
-                    player.setPlaybackSpeed(nextSpeed)
-                    gestureMessage = "Speed ${nextSpeed.formatSpeed()}x"
+                    playbackSpeed = PlaybackSpeedPreset.nextAfter(playbackSpeed)
+                    engine.setSpeed(playbackSpeed)
+                    gestureMessage = "Speed ${playbackSpeed.formatSpeed()}x"
                 },
                 onChangeDecoder = {
-                    val nextDecoderMode = playerDecoderMode.next()
-                    requestedMediaItemIndex = player.currentMediaItemIndex.coerceAtLeast(0)
-                    requestedStartPositionMillis = player.currentPosition.coerceAtLeast(0)
-                    requestedPlayWhenReady = player.playWhenReady
-                    playerDecoderMode = nextDecoderMode
-                    gestureMessage = "Decoder ${nextDecoderMode.label}"
+                    playerDecoderMode = playerDecoderMode.next()
+                    engine.setDecoderMode(playerDecoderMode)
+                    gestureMessage = "Decoder ${playerDecoderMode.label}"
                     hudVisible = true
                 },
                 onToggleResize = {
                     playerResizeMode = playerResizeMode.next()
                     videoScale = 1f
+                    engine.setVideoScale(videoScale)
+                    engine.setResizeMode(playerResizeMode)
                     gestureMessage = playerResizeMode.label
                 },
                 onRotate = {
@@ -446,18 +368,16 @@ fun PlayerScreen(
                     gestureMessage = playerOrientationMode.label
                 },
                 onPictureInPicture = {
-                    val currentActivity = activity
                     if (
-                        currentActivity != null &&
+                        activity != null &&
                         PlayerPictureInPicturePolicy.isEligible(
                             sdkInt = Build.VERSION.SDK_INT,
-                            isPlaying = player.isPlaying,
-                            hasVideo = true,
+                            isPlaying = engineState.isPlaying,
+                            hasVideo = engineState.hasVideo,
                         )
                     ) {
-                        currentActivity.enterCopyplayPictureInPicture(
-                            onFailure = { gestureMessage = it },
-                        )
+                        hudVisible = false
+                        activity.enterCopyplayPictureInPicture { gestureMessage = it }
                     } else {
                         gestureMessage = "Play video before PiP"
                     }
@@ -480,7 +400,7 @@ fun PlayerScreen(
             }
         }
 
-        failure?.let { message ->
+        engineState.failure?.let { message ->
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -511,6 +431,88 @@ fun PlayerScreen(
             }
         }
     }
+
+    trackDialog?.let { type ->
+        val tracks = when (type) {
+            PlaybackTrackType.Audio -> engineState.audioTracks
+            PlaybackTrackType.Subtitle -> engineState.subtitleTracks
+        }
+        val selectedId = when (type) {
+            PlaybackTrackType.Audio -> engineState.selectedAudioTrackId
+            PlaybackTrackType.Subtitle -> engineState.selectedSubtitleTrackId
+        }
+        TrackSelectionDialog(
+            type = type,
+            tracks = tracks,
+            selectedTrackId = selectedId,
+            onSelect = { id ->
+                when (type) {
+                    PlaybackTrackType.Audio -> engine.selectAudioTrack(id)
+                    PlaybackTrackType.Subtitle -> engine.selectSubtitleTrack(id)
+                }
+                trackDialog = null
+            },
+            onDismiss = { trackDialog = null },
+        )
+    }
+}
+
+private fun configurePlayerGestures(
+    view: SurfaceView,
+    engine: MpvPlaybackEngine,
+    window: Window?,
+    onToggleChrome: () -> Unit,
+    onResizeModeChanged: (PlayerResizeMode) -> Unit,
+    scale: () -> Float,
+    onScaleChanged: (Float) -> Unit,
+    onFeedback: (String) -> Unit,
+) {
+    val audioManager = view.context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val gestureDetector = GestureDetector(
+        view.context,
+        PlayerGestureTouchListener(
+            view = view,
+            positionMillis = { engine.state.value.positionMillis },
+            durationMillis = { engine.state.value.durationMillis },
+            onSeekTo = engine::seekTo,
+            window = window,
+            audioManager = audioManager,
+            onToggleChrome = onToggleChrome,
+            onFeedback = onFeedback,
+        ),
+    )
+    val scaleDetector = ScaleGestureDetector(
+        view.context,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                onResizeModeChanged(PlayerResizeMode.Crop)
+                engine.setResizeMode(PlayerResizeMode.Crop)
+                return true
+            }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val nextScale = (scale() * detector.scaleFactor).coerceIn(1f, 3f)
+                onScaleChanged(nextScale)
+                engine.setVideoScale(nextScale)
+                onFeedback("${(nextScale * 100).toInt()}%")
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                if (scale() < 1.02f) {
+                    onScaleChanged(1f)
+                    onResizeModeChanged(PlayerResizeMode.Fit)
+                    engine.setVideoScale(1f)
+                    engine.setResizeMode(PlayerResizeMode.Fit)
+                }
+            }
+        },
+    )
+    view.setOnTouchListener { _, event ->
+        scaleDetector.onTouchEvent(event)
+        if (!scaleDetector.isInProgress) gestureDetector.onTouchEvent(event)
+        true
+    }
 }
 
 @Composable
@@ -520,60 +522,9 @@ private fun MissingPlaybackRequest(onBack: () -> Unit) {
             .fillMaxSize()
             .padding(24.dp),
     ) {
-        Text(
-            text = "No video selected.",
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        Button(onClick = onBack) {
-            Text("Back")
-        }
+        Text(text = "No video selected.", style = MaterialTheme.typography.bodyLarge)
+        Button(onClick = onBack) { Text("Back") }
     }
-}
-
-private fun PlaybackRequest.toMediaItem(): MediaItem =
-    MediaItem.Builder()
-        .setUri(url)
-        .setSubtitleConfigurations(subtitleTracks.map { it.toSubtitleConfiguration() })
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(title)
-                .setDisplayTitle(title)
-                .build(),
-        )
-        .build()
-
-private fun PlaybackSubtitleTrack.toSubtitleConfiguration(): MediaItem.SubtitleConfiguration {
-    val selectionFlags = when {
-        isForced -> C.SELECTION_FLAG_FORCED
-        isDefault -> C.SELECTION_FLAG_DEFAULT
-        else -> 0
-    }
-    return MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
-        .setMimeType(mimeType)
-        .setLanguage(language)
-        .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
-        .setSelectionFlags(selectionFlags)
-        .setLabel(label)
-        .build()
-}
-
-private fun Player.progressSnapshot(session: PlaybackSession) =
-    session.progressSnapshot(
-        mediaItemIndex = currentMediaItemIndex,
-        positionMillis = currentPosition,
-        durationMillis = duration.takeIf { it != C.TIME_UNSET },
-        updatedAtEpochMillis = System.currentTimeMillis(),
-    )
-
-private fun PlaybackException.toFailureKind(): PlaybackFailureKind {
-    if (this is ExoPlaybackException && type == ExoPlaybackException.TYPE_SOURCE) {
-        return PlaybackFailureKind.NetworkOrServer
-    }
-    return PlaybackErrorClassifier.fromMedia3Error(
-        errorCodeName = errorCodeName,
-        isRendererError = this is ExoPlaybackException && type == ExoPlaybackException.TYPE_RENDERER,
-        technicalMessage = localizedMessage,
-    )
 }
 
 private val PlayerResizeMode.label: String
@@ -592,8 +543,15 @@ private val PlayerOrientationMode.label: String
 private val PlayerDecoderMode.label: String
     get() = when (this) {
         PlayerDecoderMode.Hardware -> "HW"
-        PlayerDecoderMode.HardwarePlus -> "HW+"
         PlayerDecoderMode.Software -> "SW"
+    }
+
+private fun PlayerDecoderMode.decoderLabel(activeDecoder: String?): String =
+    when {
+        this == PlayerDecoderMode.Software -> "SW"
+        activeDecoder == null -> "HW"
+        activeDecoder == "no" -> "SW"
+        else -> "HW"
     }
 
 private fun Activity.applyPlayerOrientation(mode: PlayerOrientationMode) {
@@ -603,50 +561,6 @@ private fun Activity.applyPlayerOrientation(mode: PlayerOrientationMode) {
         PlayerOrientationMode.Portrait -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
     }
 }
-
-private fun PlayerResizeMode.toMedia3ResizeMode(): Int =
-    when (this) {
-        PlayerResizeMode.Fit -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-        PlayerResizeMode.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-    }
-
-private fun Tracks.hasTrackType(trackType: Int): Boolean =
-    groups.any { group -> group.type == trackType && group.length > 0 }
-
-@OptIn(UnstableApi::class)
-private fun Context.showTrackSelectionDialog(
-    title: String,
-    player: Player,
-    trackType: Int,
-) {
-    TrackSelectionDialogBuilder(this, title, player, trackType)
-        .setShowDisableOption(trackType == C.TRACK_TYPE_TEXT)
-        .build()
-        .show()
-}
-
-private fun SubtitleView.applyCopyplaySubtitleStyle() {
-    setStyle(
-        CaptionStyleCompat(
-            android.graphics.Color.WHITE,
-            android.graphics.Color.TRANSPARENT,
-            android.graphics.Color.TRANSPARENT,
-            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-            android.graphics.Color.BLACK,
-            Typeface.create(Typeface.DEFAULT, Typeface.BOLD),
-        ),
-    )
-    setApplyEmbeddedStyles(true)
-    setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f)
-    setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION)
-}
-
-private fun DecoderExtensionMode.toMedia3ExtensionRendererMode(): Int =
-    when (this) {
-        DecoderExtensionMode.PlatformOnly -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
-        DecoderExtensionMode.UseAfterPlatform -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-        DecoderExtensionMode.PreferExtensions -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-    }
 
 private fun Float.formatSpeed(): String =
     if (this % 1f == 0f) toInt().toString() else toString().trimEnd('0').trimEnd('.')
@@ -705,8 +619,10 @@ private fun Activity.setPlayerSystemBarsVisible(visible: Boolean) {
 }
 
 private class PlayerGestureTouchListener(
-    private val playerView: PlayerView,
-    private val player: Player,
+    private val view: View,
+    private val positionMillis: () -> Long,
+    private val durationMillis: () -> Long?,
+    private val onSeekTo: (Long) -> Unit,
     private val window: Window?,
     private val audioManager: AudioManager,
     private val onToggleChrome: () -> Unit,
@@ -723,7 +639,7 @@ private class PlayerGestureTouchListener(
         orientation = null
         accumulatedX = 0f
         accumulatedY = 0f
-        seekStartMillis = player.currentPosition
+        seekStartMillis = positionMillis()
         return true
     }
 
@@ -733,13 +649,14 @@ private class PlayerGestureTouchListener(
     }
 
     override fun onDoubleTap(event: MotionEvent): Boolean {
-        val side = if (event.x < playerView.width / 2f) SeekSide.Backward else SeekSide.Forward
-        val target = PlayerGesturePolicy.doubleTapSeekTarget(
-            side = side,
-            currentPositionMillis = player.currentPosition,
-            durationMillis = player.duration.takeIf { it != C.TIME_UNSET },
+        val side = if (event.x < view.width / 2f) SeekSide.Backward else SeekSide.Forward
+        onSeekTo(
+            PlayerGesturePolicy.doubleTapSeekTarget(
+                side = side,
+                currentPositionMillis = positionMillis(),
+                durationMillis = durationMillis(),
+            ),
         )
-        player.seekTo(target)
         onFeedback(if (side == SeekSide.Backward) "-10s" else "+10s")
         return true
     }
@@ -752,10 +669,8 @@ private class PlayerGestureTouchListener(
     ): Boolean {
         val down = start ?: return false
         if (isInSystemGestureBorder(down)) return false
-
         accumulatedX += distanceX
         accumulatedY += distanceY
-
         if (orientation == null) {
             if (abs(accumulatedX) < gestureStepPx && abs(accumulatedY) < gestureStepPx) return true
             orientation = if (abs(accumulatedX) > abs(accumulatedY)) {
@@ -764,7 +679,6 @@ private class PlayerGestureTouchListener(
                 GestureOrientation.Vertical
             }
         }
-
         return when (orientation) {
             GestureOrientation.Horizontal -> {
                 seekHorizontally()
@@ -781,11 +695,11 @@ private class PlayerGestureTouchListener(
     private fun seekHorizontally() {
         val target = PlayerGesturePolicy.horizontalScrubTarget(
             dragDistancePx = -accumulatedX,
-            density = playerView.resources.displayMetrics.density,
+            density = view.resources.displayMetrics.density,
             startPositionMillis = seekStartMillis,
-            durationMillis = player.duration.takeIf { it != C.TIME_UNSET },
+            durationMillis = durationMillis(),
         )
-        player.seekTo(target)
+        onSeekTo(target)
         onFeedback(formatSeekDelta(target - seekStartMillis))
     }
 
@@ -795,7 +709,7 @@ private class PlayerGestureTouchListener(
         when (
             PlayerGesturePolicy.verticalTarget(
                 startX = start.x,
-                viewWidth = playerView.width,
+                viewWidth = view.width,
                 borderPx = gestureBorderPx,
             )
         ) {
@@ -827,8 +741,8 @@ private class PlayerGestureTouchListener(
     private fun isInSystemGestureBorder(event: MotionEvent): Boolean =
         event.x < gestureBorderPx ||
             event.y < gestureBorderPx ||
-            event.x > playerView.width - gestureBorderPx ||
-            event.y > playerView.height - gestureBorderPx
+            event.x > view.width - gestureBorderPx ||
+            event.y > view.height - gestureBorderPx
 }
 
 private enum class GestureOrientation {
@@ -838,6 +752,5 @@ private enum class GestureOrientation {
 
 private fun formatSeekDelta(deltaMillis: Long): String {
     val sign = if (deltaMillis >= 0) "+" else "-"
-    val seconds = abs(deltaMillis) / 1_000
-    return "$sign${seconds}s"
+    return "$sign${abs(deltaMillis) / 1_000}s"
 }

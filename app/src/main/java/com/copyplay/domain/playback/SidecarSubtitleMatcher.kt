@@ -34,7 +34,10 @@ object SidecarSubtitleMatcher {
             val suffixTokens = suffix.split('.').filter { it.isNotBlank() }
             if (!suffixTokens.areRecognizedSubtitleSuffixes()) return@mapNotNull null
             val isForced = suffixTokens.any { it.equals("forced", ignoreCase = true) }
-            val language = suffixTokens.firstOrNull { !it.equals("forced", ignoreCase = true) }
+            val isDefault = suffixTokens.isEmpty() || suffixTokens.any { it.equals("default", ignoreCase = true) }
+            val language = suffixTokens.firstOrNull { token ->
+                token.lowercase() !in SubtitleQualifierTokens && token.matches(LanguageTokenRegex)
+            }
 
             PlaybackSubtitleTrack(
                 url = directFileUrl(server, subtitle.path.segments),
@@ -42,7 +45,7 @@ object SidecarSubtitleMatcher {
                 mimeType = mimeType,
                 language = language,
                 isForced = isForced,
-                isDefault = suffixTokens.isEmpty(),
+                isDefault = isDefault,
             )
         }
     }
@@ -67,11 +70,12 @@ object SidecarSubtitleMatcher {
 
     private fun List<String>.areRecognizedSubtitleSuffixes(): Boolean {
         if (isEmpty()) return true
-        if (size > 2) return false
+        if (size > 3) return false
         return all { token ->
-            token.equals("forced", ignoreCase = true) || token.matches(LanguageTokenRegex)
+            token.lowercase() in SubtitleQualifierTokens || token.matches(LanguageTokenRegex)
         }
     }
 
+    private val SubtitleQualifierTokens = setOf("forced", "default", "sdh", "signs", "full", "commentary")
     private val LanguageTokenRegex = Regex("^[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?$")
 }

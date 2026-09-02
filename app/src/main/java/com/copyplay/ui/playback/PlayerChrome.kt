@@ -67,7 +67,6 @@ data class PlayerChromeState(
     val isBuffering: Boolean,
     val positionMillis: Long,
     val durationMillis: Long?,
-    val bufferedPercentage: Int,
     val hasPrevious: Boolean,
     val hasNext: Boolean,
     val hasAudioTracks: Boolean,
