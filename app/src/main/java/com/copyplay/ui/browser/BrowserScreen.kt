@@ -75,7 +75,7 @@ fun BrowserScreen(
     ) {
         BrowserTopBar(
             state = state,
-            onBack = { if (state.path == CopypartyPath.Root) onBack else viewModel.navigateParent() },
+            onBack = { if (state.path == CopypartyPath.Root) onBack() else viewModel.navigateParent() },
             onRefresh = viewModel::refresh,
         )
 
