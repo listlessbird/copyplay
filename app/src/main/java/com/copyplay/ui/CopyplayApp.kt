@@ -19,6 +19,7 @@ import com.copyplay.domain.playback.PlaybackStartMode
 import com.copyplay.ui.browser.BrowserScreen
 import com.copyplay.ui.browser.BrowserViewModel
 import com.copyplay.ui.home.HomeScreen
+import com.copyplay.ui.home.HomeViewModel
 import com.copyplay.ui.playback.PlayerScreen
 import com.copyplay.ui.settings.SettingsScreen
 import com.copyplay.ui.settings.SettingsViewModel
@@ -71,9 +72,10 @@ fun CopyplayApp(
         }
 
         composable(CopyplayRoute.Home.name) {
+            val homeViewModel: HomeViewModel = viewModel(factory = viewModelFactory)
+            val homeState = homeViewModel.state.collectAsStateWithLifecycle()
             HomeScreen(
-                configuredServer = configuredServer,
-                savedServer = configuredState?.savedServer,
+                state = homeState.value,
                 feed = homeFeed,
                 onBrowse = { navController.navigate(CopyplayRoute.Browser.name) },
                 onOpenVideo = { item ->
@@ -83,6 +85,8 @@ fun CopyplayApp(
                     )
                     navController.navigate(CopyplayRoute.Player.name)
                 },
+                onSelectServer = homeViewModel::selectServer,
+                onRefreshServers = homeViewModel::refresh,
                 onSettings = { navController.navigate(CopyplayRoute.Settings.name) },
             )
         }

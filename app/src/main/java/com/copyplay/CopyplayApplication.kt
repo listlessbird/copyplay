@@ -2,6 +2,7 @@ package com.copyplay
 
 import android.app.Application
 import com.copyplay.data.browser.SqliteFolderListingCache
+import com.copyplay.data.device.AndroidTailscaleDetector
 import com.copyplay.data.playback.DataStorePlaybackStore
 import com.copyplay.data.server.DataStoreServerConfigStore
 import com.copyplay.domain.browser.CopypartyFolderRepository
@@ -10,6 +11,7 @@ import com.copyplay.domain.server.ServerConfig
 import com.copyplay.domain.server.ServerConnectionRepository
 import com.copyplay.network.copyparty.CopypartyHttpClientFactory
 import com.copyplay.network.copyparty.KtorCopypartyListingClient
+import com.copyplay.network.server.KtorServerAvailabilityProber
 
 class CopyplayApplication : Application() {
     lateinit var container: CopyplayContainer
@@ -26,7 +28,8 @@ class CopyplayApplication : Application() {
         )
         val playbackStore = DataStorePlaybackStore(this)
         val folderCache = SqliteFolderListingCache(this)
-        val listingClient = KtorCopypartyListingClient(CopypartyHttpClientFactory.create())
+        val httpClient = CopypartyHttpClientFactory.create()
+        val listingClient = KtorCopypartyListingClient(httpClient)
         container = CopyplayContainer(
             serverConfigStore = store,
             copypartyFolderRepository = CopypartyFolderRepository(
@@ -43,6 +46,8 @@ class CopyplayApplication : Application() {
                 progressStore = playbackStore,
                 preferencesStore = playbackStore,
             ),
+            tailscaleDetector = AndroidTailscaleDetector(this),
+            serverAvailabilityProber = KtorServerAvailabilityProber(httpClient),
         )
     }
 }

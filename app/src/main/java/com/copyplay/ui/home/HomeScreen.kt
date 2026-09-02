@@ -1,8 +1,9 @@
 package com.copyplay.ui.home
 
-import android.text.format.DateUtils
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,290 +11,324 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.copyplay.domain.home.HomeFeed
 import com.copyplay.domain.home.HomeVideoItem
-import com.copyplay.domain.server.ServerConfig
-import com.copyplay.domain.server.SavedServerHost
+import com.copyplay.domain.playback.PlaybackWatchStatus
+import com.copyplay.domain.server.ServerAvailability
+import com.copyplay.domain.server.TailscaleStatus
 
 @Composable
 fun HomeScreen(
-    configuredServer: ServerConfig?,
-    savedServer: SavedServerHost?,
+    state: HomeUiState,
     feed: HomeFeed,
     onBrowse: () -> Unit,
     onOpenVideo: (HomeVideoItem) -> Unit,
+    onSelectServer: (HomeServerUi) -> Unit,
+    onRefreshServers: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    val configuredServer = state.servers.firstOrNull { it.isConfigured }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .systemBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+            .systemBarsPadding(),
+        contentPadding = PaddingValues(
+            horizontal = 20.dp,
+            vertical = 16.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
+        item(key = "header") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Copyplay",
-                        style = MaterialTheme.typography.headlineMedium,
+                Text(
+                    text = "Copyplay",
+                    style = MaterialTheme.typography.headlineLarge,
+                )
+                IconButton(onClick = onSettings) {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        text = "Private copyparty video player",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = onSettings) {
-                    Text("Settings")
                 }
             }
         }
 
-        item {
-            ConnectedHostPanel(
-                configuredServer = configuredServer,
-                savedServer = savedServer,
-                onBrowse = onBrowse,
-                onSettings = onSettings,
-            )
+        configuredServer?.let { server ->
+            item(key = "server-hero") {
+                ServerHeroCard(
+                    server = server,
+                    tailscaleStatus = state.tailscaleStatus,
+                    onBrowse = onBrowse,
+                )
+            }
+        }
+
+        if (state.servers.size > 1) {
+            item(key = "servers-header") {
+                SectionHeader(
+                    title = "Servers",
+                    actionIcon = Icons.Rounded.Refresh,
+                    actionLabel = "Refresh server availability",
+                    onAction = onRefreshServers,
+                )
+            }
+            item(key = "servers-list") {
+                ServerListCard(
+                    servers = state.servers.filterNot { it.isConfigured },
+                    activeServer = configuredServer,
+                    onSelectServer = onSelectServer,
+                )
+            }
         }
 
         if (feed.continueWatching.isNotEmpty()) {
-            item {
-                HomeSectionTitle(
-                    title = "Continue Watching",
-                    count = feed.continueWatching.size,
+            item(key = "continue-header") {
+                Text(
+                    text = "Continue watching",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 12.dp),
                 )
             }
-            items(feed.continueWatching, key = { it.progress.identity.toString() }) { item ->
-                HomeVideoRow(
+            itemsIndexed(
+                feed.continueWatching,
+                key = { _, item -> "continue-${item.progress.identity}" },
+            ) { _, item ->
+                ContinueWatchingCard(
                     item = item,
-                    actionLabel = "Resume",
                     onClick = { onOpenVideo(item) },
                 )
             }
         }
 
-        if (feed.recentlyPlayed.isNotEmpty()) {
-            item {
-                HomeSectionTitle(
-                    title = "Recently Played",
-                    count = feed.recentlyPlayed.size,
+        val finished = feed.recentlyPlayed.filter {
+            it.watchStatus == PlaybackWatchStatus.Completed
+        }
+        if (finished.isNotEmpty()) {
+            item(key = "finished-header") {
+                Text(
+                    text = "Recently watched",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 12.dp),
                 )
             }
-            items(feed.recentlyPlayed, key = { "recent-${it.progress.identity}" }) { item ->
-                HomeVideoRow(
-                    item = item,
-                    actionLabel = if (item.durationMillis != null && item.progressFraction() >= 0.9f) {
-                        "Start"
-                    } else {
-                        "Open"
-                    },
-                    onClick = { onOpenVideo(item) },
-                )
+            itemsIndexed(finished, key = { _, item -> "finished-${item.progress.identity}" }) { _, item ->
+                FinishedRow(item = item, onClick = { onOpenVideo(item) })
             }
         }
 
-        if (feed.continueWatching.isEmpty() && feed.recentlyPlayed.isEmpty()) {
-            item {
-                EmptyPlaybackState()
+        if (feed.continueWatching.isEmpty() && finished.isEmpty()) {
+            item(key = "empty") {
+                EmptyPlaybackState(onBrowse = onBrowse)
             }
         }
     }
 }
 
 @Composable
-private fun ConnectedHostPanel(
-    configuredServer: ServerConfig?,
-    savedServer: SavedServerHost?,
+private fun ServerHeroCard(
+    server: HomeServerUi,
+    tailscaleStatus: TailscaleStatus?,
     onBrowse: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 2.dp,
+        tonalElevation = 1.dp,
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
+                AvailabilityDot(server.availability)
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Connected host",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = savedServer?.label ?: configuredServer?.baseUrl.orEmpty(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        text = server.label,
+                        style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = configuredServer?.baseUrl.orEmpty(),
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = availabilityLabel(server.availability),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                StatusPill("Ready")
             }
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            Button(
+                onClick = onBrowse,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = MaterialTheme.shapes.large,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ),
             ) {
-                HostFact(
-                    label = "Status",
-                    value = "Verified listing API",
-                    modifier = Modifier.weight(1f),
-                )
-                HostFact(
-                    label = "Last connected",
-                    value = savedServer?.lastConnectedLabel() ?: "Current session",
-                    modifier = Modifier.weight(1f),
-                )
+                Text("Browse videos", style = MaterialTheme.typography.labelLarge)
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = onBrowse,
-                ) {
-                    Text("Browse videos")
-                }
-                OutlinedButton(onClick = onSettings) {
-                    Text("Settings")
-                }
-            }
+            TailscaleLine(status = tailscaleStatus)
         }
     }
 }
 
 @Composable
-private fun HostFact(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+private fun TailscaleLine(status: TailscaleStatus?) {
+    when (status) {
+        null, TailscaleStatus.NotInstalled -> return
+        else -> {}
+    }
+    val connected = status is TailscaleStatus.Connected
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .background(
+                    color = if (connected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outline
+                    },
+                    shape = CircleShape,
+                ),
         )
         Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
+            text = if (connected) "Tailscale connected" else "Tailscale not connected",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 @Composable
-private fun EmptyPlaybackState() {
+private fun ServerListCard(
+    servers: List<HomeServerUi>,
+    activeServer: HomeServerUi?,
+    onSelectServer: (HomeServerUi) -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = "No active videos yet",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "Open Browse and start playback. Partially watched videos will appear here.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Column {
+            servers.forEachIndexed { index, server ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectServer(server) }
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AvailabilityDot(server.availability)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = server.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = server.baseUrl,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (server == activeServer) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = "Active server",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+                if (index != servers.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun HomeSectionTitle(
-    title: String,
-    count: Int,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            text = count.toString(),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun HomeVideoRow(
+private fun ContinueWatchingCard(
     item: HomeVideoItem,
-    actionLabel: String,
     onClick: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+            modifier = Modifier.padding(14.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.medium),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -305,47 +340,143 @@ private fun HomeVideoRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    LinearProgressIndicator(
-                        progress = { item.progressFraction() },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = item.progressLabel(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                LinearProgressIndicator(
+                    progress = { item.progressFraction() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp),
+                    trackColor = MaterialTheme.colorScheme.outlineVariant,
+                    strokeCap = StrokeCap.Round,
+                )
+                Text(
+                    text = "${item.remainingLabel()} left · ${item.durationMillis?.formatClock().orEmpty()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                text = actionLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+        }
+    }
+}
+
+@Composable
+private fun FinishedRow(
+    item: HomeVideoItem,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = item.durationMillis?.formatClock().orEmpty(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun EmptyPlaybackState(onBrowse: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Nothing playing yet",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Videos you watch will show up here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = onBrowse, shape = MaterialTheme.shapes.large) {
+            Text("Browse videos")
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    actionIcon: ImageVector,
+    actionLabel: String,
+    onAction: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        IconButton(onClick = onAction, modifier = Modifier.size(32.dp)) {
+            Icon(
+                imageVector = actionIcon,
+                contentDescription = actionLabel,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
             )
         }
     }
 }
 
 @Composable
-private fun StatusPill(text: String) {
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-    ) {
-        Text(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-        )
+private fun AvailabilityDot(availability: ServerAvailability) {
+    val color = when (availability) {
+        ServerAvailability.Reachable -> Color(0xFF4ADE80)
+        ServerAvailability.Checking -> Color(0xFFFFC95A)
+        ServerAvailability.Unreachable -> Color(0xFFFF8B8B)
     }
+    Box(
+        modifier = Modifier
+            .size(10.dp)
+            .background(color, CircleShape),
+    )
 }
 
-private fun HomeVideoItem.progressLabel(): String {
-    val position = positionMillis.formatMinutes()
-    val duration = durationMillis?.formatMinutes()
-    return if (duration == null) position else "$position / $duration"
-}
+private fun availabilityLabel(availability: ServerAvailability): String =
+    when (availability) {
+        ServerAvailability.Reachable -> "Online"
+        ServerAvailability.Checking -> "Checking…"
+        ServerAvailability.Unreachable -> "Not reachable"
+    }
 
 private fun HomeVideoItem.progressFraction(): Float {
     val duration = durationMillis ?: return 0f
@@ -353,16 +484,23 @@ private fun HomeVideoItem.progressFraction(): Float {
     return (positionMillis.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
 }
 
-private fun Long.formatMinutes(): String {
-    val totalSeconds = this / 1_000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "$minutes:${seconds.toString().padStart(2, '0')}"
+private fun HomeVideoItem.remainingLabel(): String {    val duration = durationMillis ?: return positionMillis.formatClock()
+    val remaining = (duration - positionMillis).coerceAtLeast(0L)
+    val minutes = remaining / 60_000
+    return when {
+        remaining < 60_000 -> "Under a minute"
+        minutes < 60 -> "$minutes min"
+        else -> "${minutes / 60} h ${minutes % 60} min"
+    }
 }
 
-private fun SavedServerHost.lastConnectedLabel(): String =
-    DateUtils.getRelativeTimeSpanString(
-        lastConnectedAtEpochMillis,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-    ).toString()
+private fun Long.formatClock(): String {
+    val totalSeconds = this / 1_000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return when {
+        hours > 0 -> "%d:%02d:%02d".format(hours, minutes, seconds)
+        else -> "%d:%02d".format(minutes, seconds)
+    }
+}

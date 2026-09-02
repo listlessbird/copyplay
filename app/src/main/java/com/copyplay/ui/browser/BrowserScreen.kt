@@ -1,25 +1,36 @@
 package com.copyplay.ui.browser
 
+import android.text.format.DateUtils
+import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AssistChip
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -28,11 +39,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.copyplay.domain.browser.CopypartyPath
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.copyplay.domain.browser.CopypartyPath
 import com.copyplay.domain.browser.FolderEntry
 import com.copyplay.domain.browser.FolderListing
 import com.copyplay.domain.server.ServerConfig
@@ -59,19 +71,19 @@ fun BrowserScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .systemBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .systemBarsPadding(),
     ) {
-        BrowserHeader(
+        BrowserTopBar(
             state = state,
-            onClose = onBack,
+            onBack = { if (state.path == CopypartyPath.Root) onBack else viewModel.navigateParent() },
+            onRefresh = viewModel::refresh,
         )
 
-        Breadcrumbs(state = state, onOpenBreadcrumb = viewModel::openBreadcrumb)
-
-        state.listing?.let { listing ->
-            ListingSummary(listing = listing)
+        if (state.path != CopypartyPath.Root) {
+            BreadcrumbTrail(
+                state = state,
+                onOpenBreadcrumb = viewModel::openBreadcrumb,
+            )
         }
 
         state.errorMessage?.takeIf { state.listing != null }?.let { message ->
@@ -95,107 +107,115 @@ fun BrowserScreen(
 }
 
 @Composable
-private fun BrowserHeader(
+private fun BrowserTopBar(
     state: BrowserUiState,
-    onClose: () -> Unit,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
+    val listing = state.listing
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        IconButton(onClick = onBack) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = "Back",
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = state.path.displayName(),
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = if (state.path == CopypartyPath.Root) "Root folder" else state.path.encodedRelativePath(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            if (listing != null) {
+                Text(
+                    text = listingSummaryLine(listing),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        IconButton(onClick = onRefresh) {
+            Icon(
+                imageVector = Icons.Rounded.Refresh,
+                contentDescription = "Refresh",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        OutlinedButton(onClick = onClose) {
-            Text("Close")
+    }
+}
+
+private fun listingSummaryLine(listing: FolderListing): String {
+    val folders = listing.visibleEntries.count { it is FolderEntry.Directory }
+    val videos = listing.visibleEntries.count { it is FolderEntry.Video }
+    return buildString {
+        append(videos)
+        append(if (videos == 1) " video" else " videos")
+        if (folders > 0) {
+            append(" · ")
+            append(folders)
+            append(if (folders == 1) " folder" else " folders")
         }
     }
 }
 
 @Composable
-private fun Breadcrumbs(
+private fun BreadcrumbTrail(
     state: BrowserUiState,
-    onOpenBreadcrumb: (com.copyplay.domain.browser.CopypartyPath) -> Unit,
+    onOpenBreadcrumb: (CopypartyPath) -> Unit,
 ) {
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        state.path.breadcrumbs().forEach { breadcrumb ->
-            AssistChip(
-                onClick = { onOpenBreadcrumb(breadcrumb.path) },
-                label = {
-                    Text(
-                        text = breadcrumb.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        val crumbs = state.path.breadcrumbs()
+        crumbs.forEachIndexed { index, crumb ->
+            val isLast = index == crumbs.lastIndex
+            Text(
+                text = crumb.label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (isLast) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (isLast) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .clickable(enabled = !isLast) { onOpenBreadcrumb(crumb.path) }
+                    .padding(vertical = 6.dp),
             )
+            if (!isLast) {
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
-    }
-}
-
-@Composable
-private fun ListingSummary(listing: FolderListing) {
-    val folderCount = listing.visibleEntries.count { it is FolderEntry.Directory }
-    val videoCount = listing.visibleEntries.count { it is FolderEntry.Video }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BrowserFact(label = "Folders", value = folderCount.toString())
-            BrowserFact(label = "Videos", value = videoCount.toString())
-            BrowserFact(label = "Hidden subtitles", value = listing.hiddenSubtitles.size.toString())
-        }
-    }
-}
-
-@Composable
-private fun BrowserFact(
-    label: String,
-    value: String,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
 @Composable
 private fun InlineError(message: String) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
     ) {
@@ -218,64 +238,35 @@ private fun BrowserContent(
 ) {
     when {
         state.isLoading -> {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
-                Text(
-                    text = "Loading folder",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
 
         state.errorMessage != null && state.listing == null -> {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = state.errorMessage,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Button(onClick = onRefresh) {
-                    Text("Retry")
-                }
-            }
+            CenteredMessage(
+                title = "Couldn't load this folder",
+                detail = state.errorMessage,
+                actionLabel = "Retry",
+                onAction = onRefresh,
+            )
         }
 
         state.listing?.visibleEntries.isNullOrEmpty() -> {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = "No videos in this folder",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Button(onClick = onRefresh) {
-                    Text("Refresh")
-                }
-            }
+            CenteredMessage(
+                title = "Empty folder",
+                detail = "Nothing to play here.",
+                actionLabel = "Refresh",
+                onAction = onRefresh,
+            )
         }
 
         else -> {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-            ) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(
                     items = state.listing.visibleEntries,
                     key = { entry -> "${entry::class.simpleName}:${entry.path.encodedRelativePath()}" },
+                    contentType = { entry -> entry::class.simpleName },
                 ) { entry ->
                     FolderEntryRow(
                         entry = entry,
@@ -284,11 +275,10 @@ private fun BrowserContent(
                         onOpen = onOpen,
                         onOpenVideo = onOpenVideo,
                     )
-                    HorizontalDivider()
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(32.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 68.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
                 }
             }
         }
@@ -303,57 +293,129 @@ private fun FolderEntryRow(
     onOpen: (FolderEntry) -> Unit,
     onOpenVideo: (FolderListing, FolderEntry.Video) -> Unit,
 ) {
-    val typeLabel = when (entry) {
-        is FolderEntry.Directory -> "Folder"
-        is FolderEntry.Video -> "Video"
-    }
-    val accentColor = when (entry) {
-        is FolderEntry.Directory -> MaterialTheme.colorScheme.tertiary
-        is FolderEntry.Video -> MaterialTheme.colorScheme.primary
-    }
-
+    val enabled = entry is FolderEntry.Directory || (entry is FolderEntry.Video && configuredServer != null)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                enabled = entry is FolderEntry.Directory || (entry is FolderEntry.Video && configuredServer != null),
-            ) {
+            .clickable(enabled = enabled) {
                 when (entry) {
                     is FolderEntry.Directory -> onOpen(entry)
-                    is FolderEntry.Video -> if (configuredServer != null) onOpenVideo(listing, entry)
+                    is FolderEntry.Video -> onOpenVideo(listing, entry)
                 }
             }
-            .padding(vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            shape = MaterialTheme.shapes.small,
-            color = accentColor.copy(alpha = 0.16f),
-            contentColor = accentColor,
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(
+                    color = if (entry is FolderEntry.Directory) {
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    },
+                    shape = CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
         ) {
-            Text(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                text = if (entry is FolderEntry.Directory) "DIR" else "VID",
-                style = MaterialTheme.typography.labelMedium,
+            Icon(
+                imageVector = if (entry is FolderEntry.Directory) {
+                    Icons.Rounded.Folder
+                } else {
+                    Icons.Rounded.Movie
+                },
+                contentDescription = null,
+                tint = if (entry is FolderEntry.Directory) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                modifier = Modifier.size(18.dp),
             )
         }
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = entry.name,
+                text = entry.displayTitle(),
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = typeLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (entry is FolderEntry.Video) {
+                Text(
+                    text = videoMetaLine(entry),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (entry is FolderEntry.Directory) {
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(18.dp),
             )
         }
     }
+}
+
+@Composable
+private fun CenteredMessage(
+    title: String,
+    detail: String?,
+    actionLabel: String,
+    onAction: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        detail?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
+        Button(onClick = onAction) {
+            Text(actionLabel)
+        }
+    }
+}
+
+private fun FolderEntry.displayTitle(): String =
+    when (this) {
+        is FolderEntry.Directory -> name
+        is FolderEntry.Video -> name.substringBeforeLast('.', missingDelimiterValue = name)
+    }
+
+@Composable
+private fun videoMetaLine(video: FolderEntry.Video): String {
+    val parts = buildList {
+        video.sizeBytes?.let {
+            add(Formatter.formatFileSize(LocalContext.current, it))
+        }
+        video.modifiedEpochSeconds?.let {
+            add(
+                DateUtils.getRelativeTimeSpanString(
+                    it * 1_000,
+                    System.currentTimeMillis(),
+                    DateUtils.DAY_IN_MILLIS,
+                ).toString(),
+            )
+        }
+    }
+    return parts.joinToString(" · ")
 }
