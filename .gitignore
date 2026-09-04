@@ -1,0 +1,40 @@
+# Android and Gradle
+.gradle/
+.kotlin/
+.idea/
+build/
+app/build/
+local.properties
+*.jks
+*.keystore
+
+# Local reference checkouts
+reference/
+
+# Local agent and editor tooling
+.agents/
+.argent/
+.claude/
+.codex/
+.gemini/
+.opencode/
+.scratch/
+.vscode/
+.zed/
+docs/
+.mcp.json
+AGENTS.md
+CLAUDE.md
+opencode.json
+skills-lock.json
+
+# Project-local Argent installation
+node_modules/
+package.json
+package-lock.json
+npm-debug.log*
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
